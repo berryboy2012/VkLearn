@@ -15,7 +15,7 @@ openvr
 
 Add the following to the CMake options:
 ```shell
--DCMAKE_TOOLCHAIN_FILE=C:\MiscProg\vcpkg\scripts\buildsystems\vcpkg.cmake
+-DCMAKE_TOOLCHAIN_FILE=PATH_2_VCPKG\scripts\buildsystems\vcpkg.cmake
 -DVCPKG_TARGET_TRIPLET=x64-windows
 ```
 
