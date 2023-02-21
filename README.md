@@ -34,3 +34,9 @@ The rest are trivial stuffs.
 - FSR/DLSS integration.
 - Be able to view arbitrary 3D models.
 - Further explorations.
+
+## Useful resources:
+- [Vulkan Tutorial](https://vulkan-tutorial.com), the OG vulkan guide.
+- [vulkan-tutorial-hpp](https://github.com/bwasty/vulkan-tutorial-hpp), uses `Vulkan-Hpp` to rewrite the tutorial above.
+A bit buggy though.
+- [Vulkan Guide](https://vkguide.dev/), a more practical Vulkan tutorial.
