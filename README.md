@@ -30,7 +30,7 @@ The rest are trivial stuffs.
 
 ## TODO:
 - ~~Vertex staging buffer. (Transfer data from/to GPU's local memory)~~
-- Index buffer. (Tell GPU a correlate vertices with triangles)
+- ~~Index buffer. (Tell GPU a correlate vertices with triangles)~~
 - Descriptor layout and related stuff. (Create generic buffer on GPU)
 - Push constants. (Send small constant values into shader)
 - Image, image view and sampler. (Use textures in fragment shader)

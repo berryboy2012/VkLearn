@@ -10,12 +10,19 @@
 
 struct Vertex {
     glm::vec3 pos;
-    glm::vec3 color;
+    glm::vec4 color;
 };
 const std::vector<Vertex> vertices = {
-        {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-        {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-        {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
+        {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
+        {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+        {{0.0f,0.0f,0.5f}, {0.0f,0.0f,0.0f,0.0f}}
+};
+const std::vector<uint16_t> vertexIdx = {
+        0,1,2,
+        0,1,3,
+        1,2,3,
+        2,3,0
 };
 namespace render{
     const uint32_t MAX_FRAMES_IN_FLIGHT = 2;
@@ -27,6 +34,8 @@ namespace render{
 
     vk::UniqueBuffer vertexBufferU{};
     vk::UniqueDeviceMemory vertexBufferMemoryU{};
+    vk::UniqueBuffer vertexIdxBufferU{};
+    vk::UniqueDeviceMemory vertexIdxBufferMemoryU{};
 
     std::vector<vk::UniqueCommandBuffer> commandBuffersU{};
     std::vector<vk::UniqueSemaphore> imageAvailableSemaphoresU{};
@@ -279,6 +288,41 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexInputBu
     return std::make_tuple(std::move(buffer), std::move(bufferMemory));
 }
 
+std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexIdxBuffer(
+        const uint32_t &queueFamilyIdx,
+        vk::Device &device,
+        const vk::PhysicalDevice &physicalDevice,
+        vk::CommandPool &commandPool, vk::Queue &graphicsQueue){
+    using BufUsage = vk::BufferUsageFlagBits;
+    using MemProp = vk::MemoryPropertyFlagBits;
+    //TODO: use VMA instead
+
+    auto vertIdxSize = sizeof(decltype(vertexIdx)::value_type) * vertexIdx.size();
+
+    auto [stageBuffer, stageBufferMemory] = createBuffernMemory(
+            vertIdxSize,
+            BufUsage::eTransferSrc,
+            MemProp::eHostVisible | MemProp::eHostCoherent,
+            queueFamilyIdx,
+            device,
+            physicalDevice);
+    {
+        auto [resultMap, data] = device.mapMemory(stageBufferMemory.get(), 0, vertIdxSize);
+        utils::vkEnsure(resultMap);
+        std::memcpy(data, vertexIdx.data(), vertIdxSize);
+        device.unmapMemory(stageBufferMemory.get());
+    }
+    auto [buffer, bufferMemory] = createBuffernMemory(
+            vertIdxSize,
+            BufUsage::eTransferDst | BufUsage::eIndexBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            queueFamilyIdx,
+            device,
+            physicalDevice);
+    copyBuffer(stageBuffer.get(), buffer.get(), vertIdxSize, commandPool, device, graphicsQueue);
+    return std::make_tuple(std::move(buffer), std::move(bufferMemory));
+}
+
 void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPass &renderPass,
                               const vk::Extent2D &renderExtent, const vk::Pipeline &graphicsPipeline,
                               vk::CommandBuffer &commandBuffer) {
@@ -302,14 +346,15 @@ void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPas
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
 
-    //TODO: set viewport and scissor
+    //TODO: set viewport and scissor (are these already set when creating pipelines?)
 
     // This has a non-trivial ver. `2`.
     // Omit some code since here we only have one vertex buffer
     auto vertBufOffset = vk::DeviceSize{0};
     commandBuffer.bindVertexBuffers(0, 1, &render::vertexBufferU.get(), &vertBufOffset);
+    commandBuffer.bindIndexBuffer(render::vertexIdxBufferU.get(), 0, vk::IndexTypeValue<decltype(vertexIdx)::value_type>::value);
 
-    commandBuffer.draw(vertices.size(), 1, 0, 0);
+    commandBuffer.drawIndexed(vertexIdx.size(), 1, 0, 0, 0);
 
     commandBuffer.endRenderPass();
 
@@ -366,6 +411,7 @@ void setupRender(
     render::queueFamilyIndexGT = queueIdx;
     std::tie(render::graphPipeLayoutU, render::graphPipelineU) = createGraphicsPipeline(device, viewportExtent, renderPass);
     std::tie(render::vertexBufferU, render::vertexBufferMemoryU) = createTriangleVertexInputBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
+    std::tie(render::vertexIdxBufferU, render::vertexIdxBufferMemoryU) = createTriangleVertexIdxBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     render::commandBuffersU = createCommandBuffers(commandPool, device, framebuffers, renderPass, viewportExtent, render::graphPipelineU.get());
 
     createSyncObjects(device);
@@ -395,8 +441,11 @@ decltype(auto) cleanupRender4FB(){
 void cleanupRender(){
     auto [gPL, gP, cB] = cleanupRender4FB();
     auto [iASs, rFSs, iFFs] = cleanupRenderSync();
-    auto vertBuffMem = std::move(render::vertexBufferMemoryU);
+
     auto vertBuff = std::move(render::vertexBufferU);
+    auto vertBuffMem = std::move(render::vertexBufferMemoryU);
+    auto vertIdxBuff = std::move(render::vertexIdxBufferU);
+    auto vertIdxBuffMem = std::move(render::vertexIdxBufferMemoryU);
 }
 
 #endif //VKLEARN_RENDERER_HPP
