@@ -7,11 +7,20 @@
 #include <chrono>
 #include <thread>
 #include "glm/glm.hpp"
+#include "glm/gtc/matrix_transform.hpp"
 
 struct Vertex {
     glm::vec3 pos;
     glm::vec4 color;
 };
+struct ScenePushConstants {
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+struct ModelUBO {
+    glm::mat4 model;
+};
+
 const std::vector<Vertex> vertices = {
         {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
         {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
@@ -24,11 +33,15 @@ const std::vector<uint16_t> vertexIdx = {
         1,2,3,
         2,3,0
 };
+
 namespace render{
     const uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
     uint32_t queueFamilyIndexGT;
 
+    vk::UniqueDescriptorSetLayout descriptorSetLayoutU{};
+    vk::UniqueDescriptorPool descriptorPoolU{};
+    std::vector<vk::UniqueDescriptorSet> descriptorSetsU{};
     vk::UniquePipelineLayout graphPipeLayoutU{};
     vk::UniquePipeline graphPipelineU{};
 
@@ -36,16 +49,54 @@ namespace render{
     vk::UniqueDeviceMemory vertexBufferMemoryU{};
     vk::UniqueBuffer vertexIdxBufferU{};
     vk::UniqueDeviceMemory vertexIdxBufferMemoryU{};
-
+    // Frame dependent objects
     std::vector<vk::UniqueCommandBuffer> commandBuffersU{};
+    std::vector<vk::UniqueBuffer> uniformBuffersU{};
+    std::vector<vk::UniqueDeviceMemory> uniformBuffersMemoryU{};
     std::vector<vk::UniqueSemaphore> imageAvailableSemaphoresU{};
     std::vector<vk::UniqueSemaphore> renderFinishedSemaphoresU{};
     std::vector<vk::UniqueFence> inFlightFencesU{};
 
+    std::vector<void*> uniformBuffersMapped{};
+    std::vector<ScenePushConstants> sceneVPs{};
     std::vector<vk::CommandBuffer> commandBuffers{};
     std::vector<vk::Semaphore> imageAvailableSemaphores{};
     std::vector<vk::Semaphore> renderFinishedSemaphores{};
     std::vector<vk::Fence> inFlightFences{};
+}
+
+vk::UniqueDescriptorSetLayout createDescriptorSetLayout(vk::Device &device) {
+
+    vk::DescriptorSetLayoutBinding uboLayoutBinding{};
+    uboLayoutBinding.binding = 0;
+    uboLayoutBinding.descriptorCount = 1;
+    uboLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+    uboLayoutBinding.pImmutableSamplers = nullptr;
+    uboLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
+
+    vk::DescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &uboLayoutBinding;
+
+    auto [result, descriptorSetLayout] = device.createDescriptorSetLayoutUnique(layoutInfo);
+    utils::vkEnsure(result);
+    return std::move(descriptorSetLayout);
+}
+
+vk::UniqueDescriptorPool createDescriptorPool(vk::Device &device, const uint32_t MAX_FRAMES_IN_FLIGHT) {
+    vk::DescriptorPoolSize poolSize{};
+    poolSize.type = vk::DescriptorType::eUniformBuffer;//VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+    vk::DescriptorPoolCreateInfo poolInfo{};
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
+
+    auto [result, descriptorPool] = device.createDescriptorPoolUnique(poolInfo);
+    utils::vkEnsure(result);
+    return std::move(descriptorPool);
 }
 
 std::tuple<vk::UniquePipelineLayout, vk::UniquePipeline>
@@ -144,7 +195,8 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     colorBlending.blendConstants[3] = 0.0f;
 
     vk::PipelineLayoutCreateInfo pipelineLayoutInfo = {};
-    pipelineLayoutInfo.setLayoutCount = 0;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &render::descriptorSetLayoutU.get();
     pipelineLayoutInfo.pushConstantRangeCount = 0;
 
     auto [pLResult, pipelineLayout] = device.createPipelineLayoutUnique(pipelineLayoutInfo);
@@ -323,9 +375,37 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexIdxBuff
     return std::make_tuple(std::move(buffer), std::move(bufferMemory));
 }
 
+std::tuple<
+    vk::UniqueBuffer,
+    vk::UniqueDeviceMemory,
+    void*> createModelUniformBuffer(vk::Device &device, const vk::PhysicalDevice &physicalDevice) {
+
+    vk::DeviceSize bufferSize = sizeof(ModelUBO);
+
+    auto [uniformBuffer, uniformBufferMemory] = createBuffernMemory(
+            bufferSize, vk::BufferUsageFlagBits::eUniformBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent,
+            render::queueFamilyIndexGT, device, physicalDevice);
+
+    auto [result, uniformBufferMapped] = device.mapMemory(
+            uniformBufferMemory.get(), vk::DeviceSize{0}, bufferSize, vk::MemoryMapFlags{});
+    utils::vkEnsure(result);
+    return std::make_tuple(std::move(uniformBuffer), std::move(uniformBufferMemory), uniformBufferMapped);
+}
+
+void createModelUniformBuffers(vk::Device &device, const vk::PhysicalDevice &physicalDevice){
+    using namespace render;
+    uniformBuffersU.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBuffersMemoryU.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i){
+        std::tie(uniformBuffersU[i], uniformBuffersMemoryU[i], uniformBuffersMapped[i]) = createModelUniformBuffer(device, physicalDevice);
+    }
+}
+
 void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPass &renderPass,
                               const vk::Extent2D &renderExtent, const vk::Pipeline &graphicsPipeline,
-                              vk::CommandBuffer &commandBuffer) {
+                              vk::CommandBuffer &commandBuffer, uint32_t currentFrame) {
     vk::CommandBufferBeginInfo beginInfo = {};
     beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
 
@@ -353,6 +433,8 @@ void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPas
     auto vertBufOffset = vk::DeviceSize{0};
     commandBuffer.bindVertexBuffers(0, 1, &render::vertexBufferU.get(), &vertBufOffset);
     commandBuffer.bindIndexBuffer(render::vertexIdxBufferU.get(), 0, vk::IndexTypeValue<decltype(vertexIdx)::value_type>::value);
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, render::graphPipeLayoutU.get(),
+                                     0, 1, &render::descriptorSetsU[currentFrame].get(), 0, nullptr);
 
     commandBuffer.drawIndexed(vertexIdx.size(), 1, 0, 0, 0);
 
@@ -361,7 +443,34 @@ void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPas
     auto endResult = commandBuffer.end();
     utils::vkEnsure(endResult);
 }
+void createDescriptorSets(vk::Device &device) {
+    std::vector<vk::DescriptorSetLayout> layouts(render::MAX_FRAMES_IN_FLIGHT, render::descriptorSetLayoutU.get());
+    vk::DescriptorSetAllocateInfo allocInfo{};
+    allocInfo.descriptorPool = render::descriptorPoolU.get();
+    allocInfo.descriptorSetCount = layouts.size();
+    allocInfo.pSetLayouts = layouts.data();
 
+    auto [result, descriptorSets] = device.allocateDescriptorSetsUnique(allocInfo);
+    utils::vkEnsure(result);
+    render::descriptorSetsU = std::move(descriptorSets);
+
+    for (size_t i = 0; i < render::MAX_FRAMES_IN_FLIGHT; i++) {
+        vk::DescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = render::uniformBuffersU[i].get();
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(ModelUBO);
+
+        vk::WriteDescriptorSet descriptorWrite{};
+        descriptorWrite.dstSet = render::descriptorSetsU[i].get();
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pBufferInfo = &bufferInfo;
+
+        device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+    }
+}
 std::vector<vk::UniqueCommandBuffer> createCommandBuffers(
         vk::CommandPool &commandPool, vk::Device &device, std::vector<vk::UniqueFramebuffer> &framebuffers,
         vk::RenderPass &renderPass, vk::Extent2D &renderExtent, vk::Pipeline &graphicsPipeline) {
@@ -376,9 +485,6 @@ std::vector<vk::UniqueCommandBuffer> createCommandBuffers(
     auto [buffersResult, commandBuffers] = device.allocateCommandBuffersUnique(allocInfo);
     utils::vkEnsure(buffersResult);
 
-    for (size_t i = 0; i < commandBuffers.size(); i++) {
-        recordCommandBuffer(framebuffers[i].get(), renderPass, renderExtent, graphicsPipeline, commandBuffers[i].get());
-    }
     return std::move(commandBuffers);
 }
 
@@ -409,11 +515,17 @@ void setupRender(
         std::vector<vk::UniqueFramebuffer> &framebuffers,
         vk::Queue &graphicsQueue){
     render::queueFamilyIndexGT = queueIdx;
+    render::descriptorSetLayoutU = createDescriptorSetLayout(device);
+    render::descriptorPoolU = createDescriptorPool(device, render::MAX_FRAMES_IN_FLIGHT);
     std::tie(render::graphPipeLayoutU, render::graphPipelineU) = createGraphicsPipeline(device, viewportExtent, renderPass);
     std::tie(render::vertexBufferU, render::vertexBufferMemoryU) = createTriangleVertexInputBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     std::tie(render::vertexIdxBufferU, render::vertexIdxBufferMemoryU) = createTriangleVertexIdxBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
+    createModelUniformBuffers(device, physicalDevice);
     render::commandBuffersU = createCommandBuffers(commandPool, device, framebuffers, renderPass, viewportExtent, render::graphPipelineU.get());
-
+    {
+        render::sceneVPs.resize(render::MAX_FRAMES_IN_FLIGHT);
+    }
+    createDescriptorSets(device);
     createSyncObjects(device);
     {
         using namespace render;
@@ -423,6 +535,26 @@ void setupRender(
         inFlightFences = uniqueToRaw(inFlightFencesU);
     }
 }
+void updateModelUBO(const uint32_t currentFrame, const std::chrono::time_point<std::chrono::steady_clock> startTime) {
+
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+    ModelUBO ubo{};
+    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+
+    memcpy(render::uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
+}
+void updateFrameData(const uint32_t currentFrame, const vk::Extent2D swapChainExtent){
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    updateModelUBO(currentFrame, startTime);
+    // Update view and projection
+    auto sceneVP = ScenePushConstants{};
+    sceneVP.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    sceneVP.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
+    sceneVP.proj[1][1] *= -1;
+}
 
 decltype(auto) cleanupRenderSync(){
     using namespace render;
@@ -431,15 +563,21 @@ decltype(auto) cleanupRenderSync(){
             std::move(renderFinishedSemaphoresU),
             std::move(inFlightFencesU));
 }
-decltype(auto) cleanupRender4FB(){
+void cleanupRender4FB(){
     using namespace render;
-    return std::make_tuple(
-            std::move(graphPipeLayoutU),
-            std::move(graphPipelineU),
-            std::move(commandBuffersU));
+    {
+        auto gPL = std::move(graphPipeLayoutU);
+        auto gP = std::move(graphPipelineU);
+        auto cBs = std::move(commandBuffersU);
+        auto dSL = std::move(descriptorSetLayoutU);
+        auto dP = std::move(descriptorPoolU);
+        auto dSs = std::move(descriptorSetsU);
+        auto uBs = std::move(uniformBuffersU);
+        auto uBMs = std::move(uniformBuffersMemoryU);
+    }
 }
 void cleanupRender(){
-    auto [gPL, gP, cB] = cleanupRender4FB();
+    cleanupRender4FB();
     auto [iASs, rFSs, iFFs] = cleanupRenderSync();
 
     auto vertBuff = std::move(render::vertexBufferU);

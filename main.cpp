@@ -494,6 +494,7 @@ vk::UniqueCommandPool createCommandPool(vk::PhysicalDevice &chosenDevice, vk::De
     utils::vkEnsure(result);
     return std::move(commandPool);
 }
+
 std::tuple<
 std::vector<vk::UniqueCommandBuffer>,
 std::tuple<
@@ -612,7 +613,7 @@ int main(int argc, char *argv[]) {
             result = vkUniqueDevice->waitForFences(inFlightFence, VK_TRUE, std::numeric_limits<uint64_t>::max());
             utils::vkEnsure(result);
 
-            uint32_t imageIndex;
+            uint32_t imageIndex; // This is NOT the same as `frames` !
             std::tie(result, imageIndex) = vkUniqueDevice->acquireNextImageKHR(
                     vkSwapchainSDL.get(), std::numeric_limits<uint64_t>::max(), imageAvailSemaphore, nullptr);
             if (result == vk::Result::eErrorOutOfDateKHR){
@@ -650,12 +651,15 @@ int main(int argc, char *argv[]) {
 
                 // Now it's time for renderer to rerecord commandBuffer and update buffers etc.
                 // Here we just reuse it.
-                //    bool rerecordCmdBuf = false;
-                //    if(rerecordCmdBuf){
-                //        result = commandBuffers[imageIndex].reset();
-                //        utils::vkEnsure(result);
-                //        recordCommandBuffer(framebuffers[imageIndex], renderPass, renderExtent, graphicsPipeline, commandBuffer);
-                //    }
+                updateFrameData(frames, imagesPackSDL.extent);
+                bool rerecordCmdBuf = true;
+                if(rerecordCmdBuf){
+                    result = render::commandBuffers[imageIndex].reset();
+                    utils::vkEnsure(result);
+                    recordCommandBuffer(
+                            framebuffersSDL[imageIndex].get(), renderPassSDL.get(), imagesPackSDL.extent,
+                            render::graphPipelineU.get(), render::commandBuffers[imageIndex], frames);
+                }
                 commandBufferBatch.push_back(render::commandBuffers[imageIndex]);
                 // The renderer can also add their semaphores here.
 
