@@ -23,7 +23,7 @@ The rest are trivial stuffs.
 
 ## Current state:
 - Uses some features in Vulkan1.3 to make life a bit easier.
-- Can display a hard-coded mesh.
+- Can display a hard-coded mesh with Model-View-Projection matrices in effect.
 - Can handle window resize and minimize events.
 - Has a messy structure.
 - Tries to split some boilerplate into `main.cpp`, while actual rendering code resides in `renderer.hpp`.
@@ -31,8 +31,8 @@ The rest are trivial stuffs.
 ## TODO:
 - ~~Vertex staging buffer. (Transfer data from/to GPU's local memory)~~
 - ~~Index buffer. (Tell GPU a correlate vertices with triangles)~~
-- Push constants and uniform buffers for MVP matrices. (Send arbitrary structured values into shader)
-- Descriptor layout and related stuff. (Create generic buffer on GPU)
+- ~~Push constants and uniform buffers for MVP matrices. (Send arbitrary structured values into shader)~~
+- ~~Descriptor layout and related stuff. (Create generic buffer on GPU)~~
 - Image, image view and sampler. (Use textures in fragment shader)
 - Depth buffering. (Tell GPU which one of the overlapping fragments should be drawn)
 - Refactoring the code (with the help of VMA), so we don't lose our sanity when using Vulkan. 
