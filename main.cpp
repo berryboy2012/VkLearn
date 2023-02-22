@@ -592,7 +592,7 @@ int main(int argc, char *argv[]) {
     auto renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
     auto framebuffersSDL = createFramebuffers(imageViewsSDL, imagesPackSDL, renderPassSDL.get(), vkUniqueDevice.get());
     auto [graphQueueIdx, graphQueueCount] = findQueueFamilyInfo(chosenPhysicalDevice, vk::QueueFlagBits::eGraphics);
-    setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), framebuffersSDL);
+    setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), framebuffersSDL, vkQueues[0]);
     //Now for the main loop
     SDL_StartTextInput();
     size_t frames = 0;
@@ -718,7 +718,7 @@ int main(int argc, char *argv[]) {
             //renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
             framebuffersSDL = createFramebuffers(imageViewsSDL, imagesPackSDL, renderPassSDL.get(), vkUniqueDevice.get());
             // Re-initialize renderer
-            setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), framebuffersSDL);
+            setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), framebuffersSDL, vkQueues[0]);
             frames = 0;
             resetSwapchain = false;
         }

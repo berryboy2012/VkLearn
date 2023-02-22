@@ -29,7 +29,7 @@ The rest are trivial stuffs.
 - Tries to split some boilerplate into `main.cpp`, while actual rendering code resides in `renderer.hpp`.
 
 ## TODO:
-- Vertex staging buffer. (Transfer data from/to GPU's local memory)
+- ~~Vertex staging buffer. (Transfer data from/to GPU's local memory)~~
 - Index buffer. (Tell GPU a correlate vertices with triangles)
 - Descriptor layout and related stuff. (Create generic buffer on GPU)
 - Push constants. (Send small constant values into shader)

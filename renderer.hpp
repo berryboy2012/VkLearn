@@ -19,6 +19,9 @@ const std::vector<Vertex> vertices = {
 };
 namespace render{
     const uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
+    uint32_t queueFamilyIndexGT;
+
     vk::UniquePipelineLayout graphPipeLayoutU{};
     vk::UniquePipeline graphPipelineU{};
 
@@ -167,17 +170,20 @@ uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties,
 
     std::abort();
 }
-std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexInputBuffer(
+
+std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffernMemory(
+        vk::DeviceSize size,
+        vk::BufferUsageFlags usage,
+        vk::MemoryPropertyFlags properties,
         const uint32_t &queueFamilyIdx,
         vk::Device &device,
         const vk::PhysicalDevice &physicalDevice){
-    //TODO: use VMA instead
 
     auto bufferInfo = vk::BufferCreateInfo{};
     bufferInfo.flags = vk::BufferCreateFlags{};
-    bufferInfo.size = sizeof(Vertex)*vertices.size();
-    bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
-    bufferInfo.sharingMode =    vk::SharingMode::eExclusive;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = vk::SharingMode::eExclusive;
     bufferInfo.queueFamilyIndexCount = 1;
     bufferInfo.pQueueFamilyIndices = &queueFamilyIdx;
     auto [resultBuffer, buffer] = device.createBufferUnique(bufferInfo);
@@ -186,18 +192,90 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexInputBu
     auto memReqs = device.getBufferMemoryRequirements(buffer.get());
     auto memAllocInfo = vk::MemoryAllocateInfo{};
     memAllocInfo.allocationSize = memReqs.size;
-    auto memPropFlags = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
+    auto memPropFlags = properties;
     memAllocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, memPropFlags, physicalDevice);
     auto [resultMem, bufferMemory] = device.allocateMemoryUnique(memAllocInfo);
     utils::vkEnsure(resultMem);
     auto resultBind = device.bindBufferMemory(buffer.get(),bufferMemory.get(),0);
     utils::vkEnsure(resultBind);
-    {
-        auto [resultMap, data] = device.mapMemory(bufferMemory.get(), 0, bufferInfo.size);
-        std::memcpy(data, vertices.data(), bufferInfo.size);
-        device.unmapMemory(bufferMemory.get());
-    }
+    return std::make_tuple(std::move(buffer), std::move(bufferMemory));
+}
 
+void copyBuffer(vk::Buffer &srcBuffer, vk::Buffer &dstBuffer, const vk::DeviceSize &size,
+                vk::CommandPool &commandPool, vk::Device &device, vk::Queue &graphicsQueue){
+
+    vk::CommandBufferAllocateInfo allocInfo{};
+    allocInfo.level = vk::CommandBufferLevel::ePrimary;
+    allocInfo.commandPool = commandPool;
+    allocInfo.commandBufferCount = 1;
+
+    auto [resultBuffer, commandBuffersU] = device.allocateCommandBuffersUnique(allocInfo);
+    utils::vkEnsure(resultBuffer);
+
+    vk::CommandBufferBeginInfo beginInfo{};
+    beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+    auto resultBegin = commandBuffersU[0]->begin(beginInfo);
+    utils::vkEnsure(resultBegin);
+
+    std::vector<vk::BufferCopy> copyRegions;
+    vk::BufferCopy copyRegion;
+    copyRegion.srcOffset = {};
+    copyRegion.dstOffset = {};
+    copyRegion.size = size;
+    copyRegions.push_back(copyRegion);
+
+    // This has a ver. 2 variant
+    commandBuffersU[0]->copyBuffer(srcBuffer, dstBuffer, copyRegions.size(), copyRegions.data());
+
+    auto resultEnd = commandBuffersU[0]->end();
+    utils::vkEnsure(resultEnd);
+
+    vk::SubmitInfo submitInfo{};
+    submitInfo.commandBufferCount = commandBuffersU.size();
+    auto commandBuffers = uniqueToRaw(commandBuffersU);
+    submitInfo.pCommandBuffers = commandBuffers.data();
+
+    auto resultSubmit = graphicsQueue.submit(1, &submitInfo, nullptr);
+    utils::vkEnsure(resultSubmit);
+    auto resultWait = graphicsQueue.waitIdle();
+    utils::vkEnsure(resultWait);
+
+}
+
+std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexInputBuffer(
+        const uint32_t &queueFamilyIdx,
+        vk::Device &device,
+        const vk::PhysicalDevice &physicalDevice,
+        vk::CommandPool &commandPool, vk::Queue &graphicsQueue){
+
+    using BufUsage = vk::BufferUsageFlagBits;
+    using MemProp = vk::MemoryPropertyFlagBits;
+    //TODO: use VMA instead
+
+    auto verticesSize = sizeof(Vertex)*vertices.size();
+
+    auto [stageBuffer, stageBufferMemory] = createBuffernMemory(
+            verticesSize,
+            BufUsage::eTransferSrc,
+            MemProp::eHostVisible | MemProp::eHostCoherent,
+            queueFamilyIdx,
+            device,
+            physicalDevice);
+    {
+        auto [resultMap, data] = device.mapMemory(stageBufferMemory.get(), 0, verticesSize);
+        utils::vkEnsure(resultMap);
+        std::memcpy(data, vertices.data(), verticesSize);
+        device.unmapMemory(stageBufferMemory.get());
+    }
+    auto [buffer, bufferMemory] = createBuffernMemory(
+            verticesSize,
+            BufUsage::eTransferDst | BufUsage::eVertexBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            queueFamilyIdx,
+            device,
+            physicalDevice);
+    copyBuffer(stageBuffer.get(), buffer.get(), verticesSize, commandPool, device, graphicsQueue);
     return std::make_tuple(std::move(buffer), std::move(bufferMemory));
 }
 
@@ -223,6 +301,8 @@ void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPas
     commandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+
+    //TODO: set viewport and scissor
 
     // This has a non-trivial ver. `2`.
     // Omit some code since here we only have one vertex buffer
@@ -281,9 +361,11 @@ void setupRender(
         const uint32_t &queueIdx,
         vk::RenderPass &renderPass,
         vk::CommandPool &commandPool,
-        std::vector<vk::UniqueFramebuffer> &framebuffers){
+        std::vector<vk::UniqueFramebuffer> &framebuffers,
+        vk::Queue &graphicsQueue){
+    render::queueFamilyIndexGT = queueIdx;
     std::tie(render::graphPipeLayoutU, render::graphPipelineU) = createGraphicsPipeline(device, viewportExtent, renderPass);
-    std::tie(render::vertexBufferU, render::vertexBufferMemoryU) = createTriangleVertexInputBuffer(queueIdx, device, physicalDevice);
+    std::tie(render::vertexBufferU, render::vertexBufferMemoryU) = createTriangleVertexInputBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     render::commandBuffersU = createCommandBuffers(commandPool, device, framebuffers, renderPass, viewportExtent, render::graphPipelineU.get());
 
     createSyncObjects(device);
