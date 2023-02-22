@@ -7,7 +7,12 @@ layout(location = 1) in vec4 inColor;
 
 layout(location = 0) out vec4 fragColor;
 
+layout(push_constant) uniform constants{
+    mat4 view;
+    mat4 proj;
+} sceneVP;
+
 void main() {
-    gl_Position = ubo.model * vec4(inPosition, 1.0);
+    gl_Position = sceneVP.proj * sceneVP.view * ubo.model * vec4(inPosition, 1.0);
     fragColor = inColor;
 }

@@ -25,13 +25,13 @@ const std::vector<Vertex> vertices = {
         {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
         {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
         {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-        {{0.0f,0.0f,0.5f}, {0.0f,0.0f,0.0f,0.0f}}
+        {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}}
 };
 const std::vector<uint16_t> vertexIdx = {
-        0,1,2,
+        2,1,0,
         0,1,3,
         1,2,3,
-        2,3,0
+        2,0,3
 };
 
 namespace render{
@@ -194,10 +194,16 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     colorBlending.blendConstants[2] = 0.0f;
     colorBlending.blendConstants[3] = 0.0f;
 
+    vk::PushConstantRange sceneVPConstants = {};
+    sceneVPConstants.offset = 0;
+    sceneVPConstants.size = sizeof(ScenePushConstants);
+    sceneVPConstants.stageFlags = vk::ShaderStageFlagBits::eVertex;
+
     vk::PipelineLayoutCreateInfo pipelineLayoutInfo = {};
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &render::descriptorSetLayoutU.get();
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &sceneVPConstants;
 
     auto [pLResult, pipelineLayout] = device.createPipelineLayoutUnique(pipelineLayoutInfo);
     utils::vkEnsure(pLResult);
@@ -435,6 +441,7 @@ void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPas
     commandBuffer.bindIndexBuffer(render::vertexIdxBufferU.get(), 0, vk::IndexTypeValue<decltype(vertexIdx)::value_type>::value);
     commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, render::graphPipeLayoutU.get(),
                                      0, 1, &render::descriptorSetsU[currentFrame].get(), 0, nullptr);
+    commandBuffer.pushConstants(render::graphPipeLayoutU.get(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(ScenePushConstants), &render::sceneVPs[currentFrame]);
 
     commandBuffer.drawIndexed(vertexIdx.size(), 1, 0, 0, 0);
 
@@ -554,6 +561,7 @@ void updateFrameData(const uint32_t currentFrame, const vk::Extent2D swapChainEx
     sceneVP.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     sceneVP.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
     sceneVP.proj[1][1] *= -1;
+    render::sceneVPs[currentFrame] = sceneVP;
 }
 
 decltype(auto) cleanupRenderSync(){
