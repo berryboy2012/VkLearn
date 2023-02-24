@@ -593,7 +593,7 @@ int main(int argc, char *argv[]) {
     auto renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
     auto framebuffersSDL = createFramebuffers(imageViewsSDL, imagesPackSDL, renderPassSDL.get(), vkUniqueDevice.get());
     auto [graphQueueIdx, graphQueueCount] = findQueueFamilyInfo(chosenPhysicalDevice, vk::QueueFlagBits::eGraphics);
-    setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), framebuffersSDL, vkQueues[0]);
+    setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), vkQueues[0]);
     //Now for the main loop
     SDL_StartTextInput();
     size_t frames = 0;
@@ -650,17 +650,16 @@ int main(int argc, char *argv[]) {
             {
 
                 // Now it's time for renderer to rerecord commandBuffer and update buffers etc.
-                // Here we just reuse it.
                 updateFrameData(frames, imagesPackSDL.extent);
                 bool rerecordCmdBuf = true;
                 if(rerecordCmdBuf){
-                    result = render::commandBuffers[imageIndex].reset();
+                    result = render::commandBuffers[frames].reset();
                     utils::vkEnsure(result);
                     recordCommandBuffer(
                             framebuffersSDL[imageIndex].get(), renderPassSDL.get(), imagesPackSDL.extent,
-                            render::graphPipelineU.get(), render::commandBuffers[imageIndex], frames);
+                            render::graphPipelineU.get(), render::commandBuffers[frames], frames);
                 }
-                commandBufferBatch.push_back(render::commandBuffers[imageIndex]);
+                commandBufferBatch.push_back(render::commandBuffers[frames]);
                 // The renderer can also add their semaphores here.
 
             }
@@ -722,14 +721,13 @@ int main(int argc, char *argv[]) {
             //renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
             framebuffersSDL = createFramebuffers(imageViewsSDL, imagesPackSDL, renderPassSDL.get(), vkUniqueDevice.get());
             // Re-initialize renderer
-            setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), framebuffersSDL, vkQueues[0]);
+            setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), vkQueues[0]);
             frames = 0;
             resetSwapchain = false;
         }
     }
     utils::vkEnsure(vkUniqueDevice->waitIdle());
     cleanupRender();
-    //SHOW_TYPE(swapchainImagesPack)
     cleanSDL(p_SDLWindow);
     return 0;
 }

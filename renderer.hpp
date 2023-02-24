@@ -559,10 +559,10 @@ void createDescriptorSets(vk::Device &device) {
     }
 }
 std::vector<vk::UniqueCommandBuffer> createCommandBuffers(
-        vk::CommandPool &commandPool, vk::Device &device, std::vector<vk::UniqueFramebuffer> &framebuffers,
+        vk::CommandPool &commandPool, vk::Device &device,
         vk::RenderPass &renderPass, vk::Extent2D &renderExtent, vk::Pipeline &graphicsPipeline) {
 
-    auto buffersSize = framebuffers.size();
+    auto buffersSize = render::MAX_FRAMES_IN_FLIGHT;
 
     vk::CommandBufferAllocateInfo allocInfo = {};
     allocInfo.commandPool = commandPool;
@@ -599,7 +599,6 @@ void setupRender(
         const uint32_t &queueIdx,
         vk::RenderPass &renderPass,
         vk::CommandPool &commandPool,
-        std::vector<vk::UniqueFramebuffer> &framebuffers,
         vk::Queue &graphicsQueue){
     render::queueFamilyIndexGT = queueIdx;
     render::descriptorSetLayoutU = createDescriptorSetLayout(device);
@@ -608,7 +607,7 @@ void setupRender(
     std::tie(render::vertexBufferU, render::vertexBufferMemoryU) = createTriangleVertexInputBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     std::tie(render::vertexIdxBufferU, render::vertexIdxBufferMemoryU) = createTriangleVertexIdxBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     createModelUniformBuffers(device, physicalDevice);
-    render::commandBuffersU = createCommandBuffers(commandPool, device, framebuffers, renderPass, viewportExtent, render::graphPipelineU.get());
+    render::commandBuffersU = createCommandBuffers(commandPool, device, renderPass, viewportExtent, render::graphPipelineU.get());
     {
         render::sceneVPs.resize(render::MAX_FRAMES_IN_FLIGHT);
     }
@@ -636,8 +635,9 @@ void updateFrameData(const uint32_t currentFrame, const vk::Extent2D swapChainEx
     updateModelUBO(currentFrame, runTime);
     // Update view and projection
     auto sceneVP = ScenePushConstants{};
-    sceneVP.view = utils::vkuLookAtRH(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    sceneVP.proj = utils::vkuPerspectiveRHReverse_ZO(glm::radians(45.0f),
+
+    sceneVP.view = utils::vkuLookAtRH(glm::vec3(0.65f, 0.65f, 0.65f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    sceneVP.proj = utils::vkuPerspectiveRHReverse_ZO(glm::radians(60.0f),
                                                      swapChainExtent.width / (float) swapChainExtent.height, 0.1f,
                                                      10.0f);
     render::sceneVPs[currentFrame] = sceneVP;
