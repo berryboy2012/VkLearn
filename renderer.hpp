@@ -6,32 +6,112 @@
 #define VKLEARN_RENDERER_HPP
 #include <chrono>
 #include <thread>
+#include <cmath>
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include "glm/glm.hpp"
 #include "glm/gtc/matrix_transform.hpp"
 
+/* About memory alignment rules in Vulkan:
+ * For things like vertex buffer, we specify the offset of each variable when creating a pipeline, thus no additional
+ * padding rules are needed.
+ *
+ * For other buffers and images, we have to make sure the alignments are right. Those rules can be found at
+ * https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap15.html#interfaces-resources-layout
+ *
+ * A tl;dr explanation can be found at
+ * https://vulkan-tutorial.com/Uniform_buffers/Descriptor_pool_and_sets#page_Alignment-requirements
+ "
+  Vulkan expects the data in your structure to be aligned in memory in a specific way, for example:
+    Scalars have to be aligned by N (= 4 bytes given 32bit floats).
+    A vec2 must be aligned by 2N (= 8 bytes)
+    A vec3 or vec4 must be aligned by 4N (= 16 bytes)
+    A nested structure must be aligned by the base alignment of its members rounded up to a multiple of 16.
+    A mat4 matrix must have the same alignment as a vec4.
+"
+ * */
 struct Vertex {
     glm::vec3 pos;
     glm::vec4 color;
 };
-struct ScenePushConstants {
-    glm::mat4 view;
-    glm::mat4 proj;
-};
-struct ModelUBO {
-    glm::mat4 model;
-};
 
+/* Screen coordinate system for vulkan (Zd$\in$[0,1]):
+ * Red, Green and Blue correspond to approximate locations of the first three vertices
+ *                [-1]
+ *                 |
+ *                Red
+ *                 |
+ * [-1]------------0------------[1]>x
+ *                 |
+ *      Blue       |    Green
+ *                 |
+ *                [1]
+ *                 v
+ *                 y
+ *
+ * For 3D coordinates, we follow the right hand rules.
+ * */
 const std::vector<Vertex> vertices = {
         {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
         {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
         {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
         {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}}
 };
+/*Face culling convention: In OpenGL, the default values are:
+ * glCullFace == GL_BACK; glFrontFace == GL_CCW
+ * So here we follow the same convention and adjust parameters in VkPipelineRasterizationStateCreateInfo
+ * accordingly.
+ * */
 const std::vector<uint16_t> vertexIdx = {
-        2,1,0,
-        0,1,3,
-        1,2,3,
-        2,0,3
+        3,1,0,
+        3,2,1,
+        3,0,2,
+        0,1,2
+};
+/*Coordinate system differences between Vulkan and OpenGL (https://vincent-p.github.io/posts/vulkan_perspective_matrix/)
+ *
+ * Here comes our convention w.r.t. view and projection matrices (suitable for people not working at the CG industry):
+ *
+ * 1. The `lookAt(eye, center, up)` function can be thought of as two transformations:
+ *   1) Coordinate rotation transformation:
+ *      {{CX.x, CX.y, CX.z, 0},
+ *       {CY.x, CY.y, CY.z, 0},
+ *       {CZ.x, CZ.y, CZ.z, 0},
+ *       { 0.0,  0.0,  0.0, 1}}
+ *       Where CX means the direction of the camera's X-axis, CY for Y-axis and CZ for Z-axis.
+ *       In Vulkan, CZ = normalize(center-eye); CX = normalize(cross(CZ, up)); CY = cross(CZ, CX);
+ *   2) Translation, the offset vector is -eye
+ *   Thus, the final view matrix is:
+ *
+ *      {{CX.x, CX.y, CX.z, -dot(CX,eye)},
+ *       {CY.x, CY.y, CY.z, -dot(CY,eye)},
+ *       {CZ.x, CZ.y, CZ.z, -dot(CZ,eye)},
+ *       { 0.0,  0.0,  0.0,            1}}
+ *
+ * 2. The projection transformation (in general) works as follows:
+ *   1) Project X and Y component of the vertex into the near plane as X_p, Y_p
+ *   2) Scale X_p, Y_p into Normalized Device Coordinate(NDC) as X_final, Y_final
+ *   3) Convert Z component of the vertex into NDC as Zd, during which you can use tricks like inverse Zd etc.
+ *  As a result, in default Vulkan setup with the right hand coordinate, without the reverse depth trick,
+ *  X_final = X/(Z*tan(vertPOV/2.0f)*aspect); Y_final = Y/(Z*tan(vertPOV/2.0f)); Zd = (Z-near)/(far-near);
+ *  However, the expression above cannot be achieved by linear transformation. In order to use matrix multiplication, we
+ *  need another form of Zd. Thus far, the matrix can be written as:
+ *
+ *      {1/(tan(vertPOV/2.0f)*aspect),                 0.0, 0.0, 0.0}
+ *      {                         0.0, 1/tan(vertPOV/2.0f), 0.0, 0.0}
+ *      {                         0.0,                 0.0,   A,   B}
+ *      {                         0.0,                 0.0, 1.0, 0.0}
+ *
+ *      Zd must be the form of A + B / Z. We also want: A+B/near = 1.0; A+B/far = 0.0; (Reverse Zd is used here,
+ *      swap `near` and `far` if not needed)
+ *      Thus: A = near/(near-far); B = near*far/(far-near)
+ * */
+// Push constants seems to be slower than UBO
+struct ScenePushConstants {
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+struct ModelUBO {
+    glm::mat4 model;
 };
 
 namespace render{
@@ -133,13 +213,13 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
             0,//.location
             0,//.binding
             vk::Format::eR32G32B32Sfloat,//.format
-            0//.offset
+            (uint32_t)offsetof(Vertex, pos)//.offset
     };
     triangleVertexAttrDescs[1] = {
             1,
             0,
-            vk::Format::eR32G32B32Sfloat,
-            sizeof(Vertex::color)
+            vk::Format::eR32G32B32A32Sfloat,
+            (uint32_t)offsetof(Vertex, color)
     };
     triangleVertexInputInfo.vertexBindingDescriptionCount = 1;
     triangleVertexInputInfo.pVertexBindingDescriptions = &triangleVertexBindDesc;
@@ -172,8 +252,8 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = vk::PolygonMode::eFill;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = vk::CullModeFlagBits::eBack;
-    rasterizer.frontFace = vk::FrontFace::eClockwise;
+    rasterizer.cullMode = vk::CullModeFlagBits::eNone;
+    rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
     rasterizer.depthBiasEnable = VK_FALSE;
 
     vk::PipelineMultisampleStateCreateInfo multisampling = {};
@@ -542,25 +622,24 @@ void setupRender(
         inFlightFences = uniqueToRaw(inFlightFencesU);
     }
 }
-void updateModelUBO(const uint32_t currentFrame, const std::chrono::time_point<std::chrono::steady_clock> startTime) {
-
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+void updateModelUBO(const uint32_t currentFrame, const float runTime) {
 
     ModelUBO ubo{};
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.model = glm::rotate(glm::mat4(1.0f), runTime * glm::radians(37.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
-
-    memcpy(render::uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
+    std::memcpy(render::uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
 }
 void updateFrameData(const uint32_t currentFrame, const vk::Extent2D swapChainExtent){
     static auto startTime = std::chrono::high_resolution_clock::now();
-    updateModelUBO(currentFrame, startTime);
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float runTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+    updateModelUBO(currentFrame, runTime);
     // Update view and projection
     auto sceneVP = ScenePushConstants{};
-    sceneVP.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    sceneVP.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
-    sceneVP.proj[1][1] *= -1;
+    sceneVP.view = utils::vkuLookAtRH(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    sceneVP.proj = utils::vkuPerspectiveRHReverse_ZO(glm::radians(45.0f),
+                                                     swapChainExtent.width / (float) swapChainExtent.height, 0.1f,
+                                                     10.0f);
     render::sceneVPs[currentFrame] = sceneVP;
 }
 

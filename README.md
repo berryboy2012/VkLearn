@@ -1,6 +1,6 @@
 # VkLearn
 
-A personal project for learning Vulkan1.3, VMA, SDL, Dear ImGui, OpenVR, DLSS/FSR etc.
+A personal project for learning Vulkan1.3, VMA, assimp, meshoptimizer, SDL, Dear ImGui, OpenVR, DLSS/FSR etc.
 
 ## Building
 
@@ -25,6 +25,7 @@ The rest are trivial stuffs.
 - Uses some features in Vulkan1.3 to make life a bit easier.
 - Can display a hard-coded mesh with Model-View-Projection matrices in effect.
 - Can handle window resize and minimize events.
+- Uses right-hand coordinate with correct equivalent implementation of `glm::lookAt` and `glm::perspective`.
 - Has a messy structure.
 - Tries to split some boilerplate into `main.cpp`, while actual rendering code resides in `renderer.hpp`.
 
@@ -33,6 +34,8 @@ The rest are trivial stuffs.
 - ~~Index buffer. (Tell GPU a correlate vertices with triangles)~~
 - ~~Push constants and uniform buffers for MVP matrices. (Send arbitrary structured values into shader)~~
 - ~~Descriptor layout and related stuff. (Create generic buffer on GPU)~~
+- ~~Handle differences in coordinate system between Vulkan and OpenGL, so we can use `glm` without 
+ scratching head.~~
 - Image, image view and sampler. (Use textures in fragment shader)
 - Depth buffering. (Tell GPU which one of the overlapping fragments should be drawn)
 - Refactoring the code (with the help of VMA), so we don't lose our sanity when using Vulkan. 
@@ -46,5 +49,5 @@ The rest are trivial stuffs.
 ## Useful resources:
 - [Vulkan Tutorial](https://vulkan-tutorial.com), the OG vulkan guide.
 - [vulkan-tutorial-hpp](https://github.com/bwasty/vulkan-tutorial-hpp), uses `Vulkan-Hpp` to rewrite the tutorial above.
-A bit buggy though.
+Has some typos though.
 - [Vulkan Guide](https://vkguide.dev/), a more practical Vulkan tutorial.
