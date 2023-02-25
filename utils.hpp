@@ -10,9 +10,15 @@
 #include <any>
 #include <fstream>
 #include "glm/glm.hpp"
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_PNG
+#define STBI_ONLY_BMP
+#define STBI_ONLY_TGA
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 namespace utils {
-    struct TextureObject {
+    struct TextureObjectOld {
         vk::Sampler sampler;
 
         vk::Image image;
@@ -26,6 +32,7 @@ namespace utils {
         uint32_t tex_width{0};
         uint32_t tex_height{0};
     };
+
     struct SwapchainImageResources {
         vk::Image image;
         vk::CommandBuffer cmd;

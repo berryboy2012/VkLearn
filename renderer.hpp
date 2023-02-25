@@ -118,6 +118,10 @@ namespace render{
     const uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
     uint32_t queueFamilyIndexGT;
+    vk::Device renderDevice;
+    vk::PhysicalDevice renderPhysicalDevice;
+    vk::CommandPool renderCommandPool;
+    vk::Queue renderQueue;
 
     vk::UniqueDescriptorSetLayout descriptorSetLayoutU{};
     vk::UniqueDescriptorPool descriptorPoolU{};
@@ -390,6 +394,42 @@ void copyBuffer(vk::Buffer &srcBuffer, vk::Buffer &dstBuffer, const vk::DeviceSi
 
 }
 
+std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffernMemoryFromHostData(
+        vk::DeviceSize size,
+        void* hostData,
+        vk::BufferUsageFlags usage,
+        vk::MemoryPropertyFlags properties,
+        const uint32_t &queueFamilyIdx,
+        vk::Device &device,
+        const vk::PhysicalDevice &physicalDevice,
+        vk::CommandPool &commandPool,
+        vk::Queue &graphicsQueue) {
+    using BufUsage = vk::BufferUsageFlagBits;
+    using MemProp = vk::MemoryPropertyFlagBits;
+    auto [stageBuffer, stageBufferMemory] = createBuffernMemory(
+            size,
+            BufUsage::eTransferSrc,
+            MemProp::eHostVisible | MemProp::eHostCoherent,
+            queueFamilyIdx,
+            device,
+            physicalDevice);
+    {
+        auto [resultMap, data] = device.mapMemory(stageBufferMemory.get(), 0, size);
+        utils::vkEnsure(resultMap);
+        std::memcpy(data, hostData, size);
+        device.unmapMemory(stageBufferMemory.get());
+    }
+    auto [buffer, bufferMemory] = createBuffernMemory(
+            size,
+            BufUsage::eTransferDst | usage,
+            properties,
+            queueFamilyIdx,
+            device,
+            physicalDevice);
+    copyBuffer(stageBuffer.get(), buffer.get(), size, commandPool, device, graphicsQueue);
+    return std::make_tuple(std::move(buffer), std::move(bufferMemory));
+}
+
 std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexInputBuffer(
         const uint32_t &queueFamilyIdx,
         vk::Device &device,
@@ -401,28 +441,11 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexInputBu
     //TODO: use VMA instead
 
     auto verticesSize = sizeof(Vertex)*vertices.size();
+    auto [buffer, bufferMemory] = createBuffernMemoryFromHostData(
+            verticesSize, (void*)vertices.data(),
+            BufUsage::eVertexBuffer, MemProp::eDeviceLocal,
+            queueFamilyIdx, device, physicalDevice, commandPool, graphicsQueue);
 
-    auto [stageBuffer, stageBufferMemory] = createBuffernMemory(
-            verticesSize,
-            BufUsage::eTransferSrc,
-            MemProp::eHostVisible | MemProp::eHostCoherent,
-            queueFamilyIdx,
-            device,
-            physicalDevice);
-    {
-        auto [resultMap, data] = device.mapMemory(stageBufferMemory.get(), 0, verticesSize);
-        utils::vkEnsure(resultMap);
-        std::memcpy(data, vertices.data(), verticesSize);
-        device.unmapMemory(stageBufferMemory.get());
-    }
-    auto [buffer, bufferMemory] = createBuffernMemory(
-            verticesSize,
-            BufUsage::eTransferDst | BufUsage::eVertexBuffer,
-            vk::MemoryPropertyFlagBits::eDeviceLocal,
-            queueFamilyIdx,
-            device,
-            physicalDevice);
-    copyBuffer(stageBuffer.get(), buffer.get(), verticesSize, commandPool, device, graphicsQueue);
     return std::make_tuple(std::move(buffer), std::move(bufferMemory));
 }
 
@@ -436,28 +459,11 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexIdxBuff
     //TODO: use VMA instead
 
     auto vertIdxSize = sizeof(decltype(vertexIdx)::value_type) * vertexIdx.size();
+    auto [buffer, bufferMemory] = createBuffernMemoryFromHostData(
+            vertIdxSize, (void*)vertexIdx.data(),
+            BufUsage::eIndexBuffer, MemProp::eDeviceLocal,
+            queueFamilyIdx, device, physicalDevice, commandPool, graphicsQueue);
 
-    auto [stageBuffer, stageBufferMemory] = createBuffernMemory(
-            vertIdxSize,
-            BufUsage::eTransferSrc,
-            MemProp::eHostVisible | MemProp::eHostCoherent,
-            queueFamilyIdx,
-            device,
-            physicalDevice);
-    {
-        auto [resultMap, data] = device.mapMemory(stageBufferMemory.get(), 0, vertIdxSize);
-        utils::vkEnsure(resultMap);
-        std::memcpy(data, vertexIdx.data(), vertIdxSize);
-        device.unmapMemory(stageBufferMemory.get());
-    }
-    auto [buffer, bufferMemory] = createBuffernMemory(
-            vertIdxSize,
-            BufUsage::eTransferDst | BufUsage::eIndexBuffer,
-            vk::MemoryPropertyFlagBits::eDeviceLocal,
-            queueFamilyIdx,
-            device,
-            physicalDevice);
-    copyBuffer(stageBuffer.get(), buffer.get(), vertIdxSize, commandPool, device, graphicsQueue);
     return std::make_tuple(std::move(buffer), std::move(bufferMemory));
 }
 
@@ -559,8 +565,7 @@ void createDescriptorSets(vk::Device &device) {
     }
 }
 std::vector<vk::UniqueCommandBuffer> createCommandBuffers(
-        vk::CommandPool &commandPool, vk::Device &device,
-        vk::RenderPass &renderPass, vk::Extent2D &renderExtent, vk::Pipeline &graphicsPipeline) {
+        vk::CommandPool &commandPool, vk::Device &device) {
 
     auto buffersSize = render::MAX_FRAMES_IN_FLIGHT;
 
@@ -574,7 +579,77 @@ std::vector<vk::UniqueCommandBuffer> createCommandBuffers(
 
     return std::move(commandBuffers);
 }
+namespace render {
+    class TextureObject {
+    public:
+        vk::UniqueSampler sampler{};
 
+        vk::UniqueImage image{};
+        vk::UniqueBuffer buffer{};
+        vk::ImageLayout imageLayout{vk::ImageLayout::eUndefined};
+
+        vk::MemoryAllocateInfo mem_alloc{};
+        vk::UniqueDeviceMemory mem{};
+        vk::UniqueImageView view{};
+
+        uint32_t texWidth{0};
+        uint32_t texHeight{0};
+        uint32_t texChannels{0};
+
+        explicit TextureObject(const std::string &filePath){
+            {
+                int width, height, channels;
+                int ok;
+                ok = stbi_info(filePath.c_str(), &width, &height, &channels);
+                if (ok == 1 && channels == 4) {
+                    pixels = stbi_load(filePath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+                } else {
+                    std::abort();
+                }
+                texWidth = width;
+                texHeight = height;
+                texChannels = channels;
+            }
+            auto devSize = vk::DeviceSize{texWidth*texHeight*texChannels};
+            using BufUsage = vk::BufferUsageFlagBits;
+            using MemProp = vk::MemoryPropertyFlagBits;
+//            std::tie(buffer, mem) = createBuffernMemoryFromHostData(devSize, BufUsage::eTransferSrc,
+//                                                        MemProp::eHostCoherent | MemProp::eHostVisible,
+//                                                        queueFamilyIndexGT, renderDevice, renderPhysicalDevice);
+
+        }
+        TextureObject() = default;
+        TextureObject(const TextureObject &) = delete;
+        TextureObject& operator= (const TextureObject &) = delete;
+        TextureObject& operator= (TextureObject &&other) noexcept {
+            if (this != &other){
+                sampler = std::move(other.sampler);
+                image = std::move(other.image);
+                buffer = std::move(other.buffer);
+                imageLayout = other.imageLayout;
+                mem_alloc = other.mem_alloc;
+                mem = std::move(other.mem);
+                view = std::move(other.view);
+                texWidth = other.texWidth;
+                texHeight = other.texHeight;
+                texChannels = other.texChannels;
+                pixels = other.pixels;
+                other.pixels = nullptr;
+            }
+            return *this;
+        }
+        TextureObject(TextureObject &&other) noexcept{
+            *this = std::move(other);
+        }
+        ~TextureObject(){
+            if (pixels != nullptr) {
+                stbi_image_free(pixels);
+            }
+        }
+    private:
+        stbi_uc* pixels{};
+    };
+}
 void createSyncObjects(vk::Device &device) {
     using namespace render;
     imageAvailableSemaphoresU.resize(MAX_FRAMES_IN_FLIGHT);
@@ -600,14 +675,21 @@ void setupRender(
         vk::RenderPass &renderPass,
         vk::CommandPool &commandPool,
         vk::Queue &graphicsQueue){
-    render::queueFamilyIndexGT = queueIdx;
+    {
+        using namespace render;
+        queueFamilyIndexGT = queueIdx;
+        renderDevice = device;
+        renderPhysicalDevice = physicalDevice;
+        renderCommandPool = commandPool;
+        renderQueue = graphicsQueue;
+    }
     render::descriptorSetLayoutU = createDescriptorSetLayout(device);
     render::descriptorPoolU = createDescriptorPool(device, render::MAX_FRAMES_IN_FLIGHT);
     std::tie(render::graphPipeLayoutU, render::graphPipelineU) = createGraphicsPipeline(device, viewportExtent, renderPass);
     std::tie(render::vertexBufferU, render::vertexBufferMemoryU) = createTriangleVertexInputBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     std::tie(render::vertexIdxBufferU, render::vertexIdxBufferMemoryU) = createTriangleVertexIdxBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     createModelUniformBuffers(device, physicalDevice);
-    render::commandBuffersU = createCommandBuffers(commandPool, device, renderPass, viewportExtent, render::graphPipelineU.get());
+    render::commandBuffersU = createCommandBuffers(commandPool, device);
     {
         render::sceneVPs.resize(render::MAX_FRAMES_IN_FLIGHT);
     }

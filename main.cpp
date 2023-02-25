@@ -397,7 +397,6 @@ createSwapChainnImages(const vk::PhysicalDevice &physicalDevice,
         .extent = extent
     };
     return std::make_tuple(std::move(swapChain),std::move(imagesPack));
-
 }
 
 std::vector<vk::UniqueImageView> createImageViews(utils::VkImagesPack &imagesPack, vk::Device &device) {

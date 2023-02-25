@@ -11,6 +11,7 @@ vulkan-headers
 glm
 vulkan-memory-allocator-hpp
 openvr
+stb
 ```
 
 Add the following to the CMake options:
