@@ -58,10 +58,10 @@ struct Vertex {
  * For 3D coordinates, we follow the right hand rules.
  * */
 const std::vector<Vertex> vertices = {
-        {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
-        {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-        {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-        {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 1.0f}}
+        {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+        {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+        {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+        {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 0.0f}}
 };
 /*Face culling convention: In OpenGL, the default values are:
  * glCullFace == GL_BACK; glFrontFace == GL_CCW
