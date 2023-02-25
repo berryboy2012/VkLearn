@@ -27,6 +27,10 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
     #undef max
 #endif
 #include "utils.hpp"
+std::vector<vk::UniqueImageView> createImageViews(
+        const std::span<vk::Image>& images,
+        vk::Format format,
+        vk::Device &device);
 #include "renderer.hpp"
 void queryOVR(){
     vr::EVRInitError eError = vr::VRInitError_None;
@@ -399,12 +403,15 @@ createSwapChainnImages(const vk::PhysicalDevice &physicalDevice,
     return std::make_tuple(std::move(swapChain),std::move(imagesPack));
 }
 
-std::vector<vk::UniqueImageView> createImageViews(utils::VkImagesPack &imagesPack, vk::Device &device) {
+std::vector<vk::UniqueImageView> createImageViews(
+        const std::span<vk::Image>& images,
+        vk::Format format,
+        vk::Device &device) {
     auto imageViews = std::vector<vk::UniqueImageView>{};
-    imageViews.resize(imagesPack.images.size());
+    imageViews.resize(images.size());
     vk::ImageViewCreateInfo createInfo = {};
     createInfo.viewType = vk::ImageViewType::e2D;
-    createInfo.format = imagesPack.format;
+    createInfo.format = format;
     createInfo.components.r = vk::ComponentSwizzle::eIdentity;
     createInfo.components.g = vk::ComponentSwizzle::eIdentity;
     createInfo.components.b = vk::ComponentSwizzle::eIdentity;
@@ -414,8 +421,8 @@ std::vector<vk::UniqueImageView> createImageViews(utils::VkImagesPack &imagesPac
     createInfo.subresourceRange.levelCount = 1;
     createInfo.subresourceRange.baseArrayLayer = 0;
     createInfo.subresourceRange.layerCount = 1;
-    for (size_t i = 0; i < imagesPack.images.size(); i++) {
-        createInfo.image = imagesPack.images[i];
+    for (size_t i = 0; i < images.size(); i++) {
+        createInfo.image = images[i];
         auto [result, imageView] = device.createImageViewUnique(createInfo);
         utils::vkEnsure(result);
         imageViews[i] = std::move(imageView);
@@ -588,7 +595,7 @@ int main(int argc, char *argv[]) {
     auto vkCommandPool = createCommandPool(chosenPhysicalDevice, vkUniqueDevice.get(),vkSurfaceSDL.get());
     // Swapchain for SDL2's surface and corresponding imagesPack
     auto [vkSwapchainSDL, imagesPackSDL] = createSwapChainnImages(chosenPhysicalDevice, vkSurfaceSDL.get(), p_SDLWindow, vkUniqueDevice.get());
-    auto imageViewsSDL = createImageViews(imagesPackSDL, vkUniqueDevice.get());
+    auto imageViewsSDL = createImageViews(imagesPackSDL.images, imagesPackSDL.format, vkUniqueDevice.get());
     auto renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
     auto framebuffersSDL = createFramebuffers(imageViewsSDL, imagesPackSDL, renderPassSDL.get(), vkUniqueDevice.get());
     auto [graphQueueIdx, graphQueueCount] = findQueueFamilyInfo(chosenPhysicalDevice, vk::QueueFlagBits::eGraphics);
@@ -716,7 +723,7 @@ int main(int argc, char *argv[]) {
             // Recreate those vulkan objects
             //vkCommandPool = createCommandPool(chosenPhysicalDevice, vkUniqueDevice.get(),vkSurfaceSDL.get());
             std::tie(vkSwapchainSDL, imagesPackSDL) = createSwapChainnImages(chosenPhysicalDevice, vkSurfaceSDL.get(), p_SDLWindow, vkUniqueDevice.get(), vkSwapchainSDL.get());
-            imageViewsSDL = createImageViews(imagesPackSDL, vkUniqueDevice.get());
+            imageViewsSDL = createImageViews(imagesPackSDL.images, imagesPackSDL.format, vkUniqueDevice.get());
             //renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
             framebuffersSDL = createFramebuffers(imageViewsSDL, imagesPackSDL, renderPassSDL.get(), vkUniqueDevice.get());
             // Re-initialize renderer

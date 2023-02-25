@@ -10,12 +10,6 @@
 #include <any>
 #include <fstream>
 #include "glm/glm.hpp"
-#define STBI_ONLY_JPEG
-#define STBI_ONLY_PNG
-#define STBI_ONLY_BMP
-#define STBI_ONLY_TGA
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
 
 namespace utils {
     struct TextureObjectOld {
@@ -158,6 +152,51 @@ namespace utils {
         utils::vkEnsure(result, "createShaderModule() failed");
         return std::move(shaderModule);
     }
+
+    // Submit the recorded vk::CommandBuffer once dtor is called.
+    class SingleTimeCommandBuffer {
+    public:
+        vk::CommandBuffer coBuf{};
+        SingleTimeCommandBuffer(const SingleTimeCommandBuffer &) = delete;
+        SingleTimeCommandBuffer& operator= (const SingleTimeCommandBuffer &) = delete;
+        SingleTimeCommandBuffer(vk::CommandPool &commandPool, vk::Queue &queue, vk::Device &device):
+                commandPool_(commandPool),
+                queue_(queue),
+                device_(device)
+        {
+            vk::CommandBufferAllocateInfo allocInfo{};
+            allocInfo.level = vk::CommandBufferLevel::ePrimary;
+            allocInfo.commandPool = commandPool;
+            allocInfo.commandBufferCount = 1;
+            {
+                vk::Result result{};
+                std::tie(result, commBuffs_) = device.allocateCommandBuffers(allocInfo);
+                vkEnsure(result);
+            }
+            coBuf = commBuffs_[0];
+            vk::CommandBufferBeginInfo beginInfo{};
+            beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+            auto result = coBuf.begin(beginInfo);
+            vkEnsure(result);
+        }
+        ~SingleTimeCommandBuffer(){
+            auto result = coBuf.end();
+            vkEnsure(result);
+            vk::SubmitInfo submitInfo{};
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &coBuf;
+            auto subResult = queue_.submit(submitInfo);
+            vkEnsure(subResult);
+            auto waitResult = queue_.waitIdle();
+            vkEnsure(waitResult);
+            device_.freeCommandBuffers(commandPool_, commBuffs_);
+        }
+    private:
+        std::vector<vk::CommandBuffer> commBuffs_{};
+        vk::Device device_{};
+        vk::CommandPool commandPool_{};
+        vk::Queue queue_{};
+    };
     template<typename T>
     inline glm::mat<4, 4, T> vkuLookAtRH(glm::vec<3, T> const& eye, glm::vec<3, T> const& center, glm::vec<3, T> const& up)
     {

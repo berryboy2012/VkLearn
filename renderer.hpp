@@ -10,6 +10,12 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include "glm/glm.hpp"
 #include "glm/gtc/matrix_transform.hpp"
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_PNG
+#define STBI_ONLY_BMP
+#define STBI_ONLY_TGA
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 /* About memory alignment rules in Vulkan:
  * For things like vertex buffer, we specify the offset of each variable when creating a pipeline, thus no additional
@@ -32,6 +38,7 @@
 struct Vertex {
     glm::vec3 pos;
     glm::vec4 color;
+    glm::vec2 texCoord;
 };
 
 /* Screen coordinate system for vulkan (Zd$\in$[0,1]):
@@ -51,10 +58,10 @@ struct Vertex {
  * For 3D coordinates, we follow the right hand rules.
  * */
 const std::vector<Vertex> vertices = {
-        {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-        {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-        {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-        {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}}
+        {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+        {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+        {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+        {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 1.0f}}
 };
 /*Face culling convention: In OpenGL, the default values are:
  * glCullFace == GL_BACK; glFrontFace == GL_CCW
@@ -62,10 +69,10 @@ const std::vector<Vertex> vertices = {
  * accordingly.
  * */
 const std::vector<uint16_t> vertexIdx = {
-        3,1,0,
-        3,2,1,
-        3,0,2,
-        0,1,2
+        0,1,3,
+        1,2,3,
+        2,0,3,
+        2,1,0
 };
 /*Coordinate system differences between Vulkan and OpenGL (https://vincent-p.github.io/posts/vulkan_perspective_matrix/)
  *
@@ -133,6 +140,7 @@ namespace render{
     vk::UniqueDeviceMemory vertexBufferMemoryU{};
     vk::UniqueBuffer vertexIdxBufferU{};
     vk::UniqueDeviceMemory vertexIdxBufferMemoryU{};
+
     // Frame dependent objects
     std::vector<vk::UniqueCommandBuffer> commandBuffersU{};
     std::vector<vk::UniqueBuffer> uniformBuffersU{};
@@ -149,6 +157,7 @@ namespace render{
     std::vector<vk::Fence> inFlightFences{};
 }
 
+// TODO: let each resource self register layout
 vk::UniqueDescriptorSetLayout createDescriptorSetLayout(vk::Device &device) {
 
     vk::DescriptorSetLayoutBinding uboLayoutBinding{};
@@ -158,23 +167,35 @@ vk::UniqueDescriptorSetLayout createDescriptorSetLayout(vk::Device &device) {
     uboLayoutBinding.pImmutableSamplers = nullptr;
     uboLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
 
+    vk::DescriptorSetLayoutBinding samplerLayoutBinding{};
+    samplerLayoutBinding.binding = 1;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    samplerLayoutBinding.pImmutableSamplers = nullptr;
+    samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+    std::array<vk::DescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
+
     vk::DescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &uboLayoutBinding;
+    layoutInfo.bindingCount = bindings.size();
+    layoutInfo.pBindings = bindings.data();
 
     auto [result, descriptorSetLayout] = device.createDescriptorSetLayoutUnique(layoutInfo);
     utils::vkEnsure(result);
     return std::move(descriptorSetLayout);
 }
 
+// TODO: let each resource self register layout
 vk::UniqueDescriptorPool createDescriptorPool(vk::Device &device, const uint32_t MAX_FRAMES_IN_FLIGHT) {
-    vk::DescriptorPoolSize poolSize{};
-    poolSize.type = vk::DescriptorType::eUniformBuffer;//VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    std::array<vk::DescriptorPoolSize, 2> poolSizes{};
+    poolSizes[0].type = vk::DescriptorType::eUniformBuffer;
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolSizes[1].type = vk::DescriptorType::eCombinedImageSampler;
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
     vk::DescriptorPoolCreateInfo poolInfo{};
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.poolSizeCount = poolSizes.size();
+    poolInfo.pPoolSizes = poolSizes.data();
     poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
     poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
 
@@ -212,7 +233,7 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
         sizeof(Vertex),//.stride
         vk::VertexInputRate::eVertex//.inputRate
     };
-    auto triangleVertexAttrDescs = std::array<vk::VertexInputAttributeDescription,2>{};
+    auto triangleVertexAttrDescs = std::array<vk::VertexInputAttributeDescription,3>{};
     triangleVertexAttrDescs[0] = {
             0,//.location
             0,//.binding
@@ -224,6 +245,12 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
             0,
             vk::Format::eR32G32B32A32Sfloat,
             (uint32_t)offsetof(Vertex, color)
+    };
+    triangleVertexAttrDescs[2] = {
+            2,
+            0,
+            vk::Format::eR32G32Sfloat,
+            (uint32_t)offsetof(Vertex, texCoord)
     };
     triangleVertexInputInfo.vertexBindingDescriptionCount = 1;
     triangleVertexInputInfo.pVertexBindingDescriptions = &triangleVertexBindDesc;
@@ -256,7 +283,7 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = vk::PolygonMode::eFill;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = vk::CullModeFlagBits::eNone;
+    rasterizer.cullMode = vk::CullModeFlagBits::eBack;
     rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
     rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -352,22 +379,48 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffernMemory(
     return std::make_tuple(std::move(buffer), std::move(bufferMemory));
 }
 
+std::tuple<vk::UniqueImage, vk::UniqueDeviceMemory> createImagenMemory(
+        const vk::Extent3D &extent,
+        const vk::Format &format,
+        const vk::ImageTiling &tiling,
+        const vk::ImageLayout &layout,
+        const vk::ImageUsageFlags &usage,
+        const vk::MemoryPropertyFlags &properties,
+        const uint32_t &queueFamilyIdx,
+        vk::Device &device,
+        const vk::PhysicalDevice &physicalDevice){
+
+    auto imageInfo = vk::ImageCreateInfo{};
+    imageInfo.flags = vk::ImageCreateFlags{};
+    imageInfo.imageType = vk::ImageType::e2D;
+    imageInfo.extent = extent;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = format;
+    imageInfo.tiling = tiling;
+    imageInfo.initialLayout = layout;
+    imageInfo.usage = usage;
+    imageInfo.samples = vk::SampleCountFlagBits::e1;
+    imageInfo.sharingMode = vk::SharingMode::eExclusive;
+    imageInfo.queueFamilyIndexCount = 1;
+    imageInfo.pQueueFamilyIndices = &queueFamilyIdx;
+    auto [resultImage, image] = device.createImageUnique(imageInfo);
+    utils::vkEnsure(resultImage);
+    // This has a `2` variant
+    auto memReqs = device.getImageMemoryRequirements(image.get());
+    auto memAllocInfo = vk::MemoryAllocateInfo{};
+    memAllocInfo.allocationSize = memReqs.size;
+    auto memPropFlags = properties;
+    memAllocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, memPropFlags, physicalDevice);
+    auto [resultMem, imageMemory] = device.allocateMemoryUnique(memAllocInfo);
+    utils::vkEnsure(resultMem);
+    auto resultBind = device.bindImageMemory(image.get(), imageMemory.get(), 0);
+    utils::vkEnsure(resultBind);
+    return std::make_tuple(std::move(image), std::move(imageMemory));
+}
+
 void copyBuffer(vk::Buffer &srcBuffer, vk::Buffer &dstBuffer, const vk::DeviceSize &size,
                 vk::CommandPool &commandPool, vk::Device &device, vk::Queue &graphicsQueue){
-
-    vk::CommandBufferAllocateInfo allocInfo{};
-    allocInfo.level = vk::CommandBufferLevel::ePrimary;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    auto [resultBuffer, commandBuffersU] = device.allocateCommandBuffersUnique(allocInfo);
-    utils::vkEnsure(resultBuffer);
-
-    vk::CommandBufferBeginInfo beginInfo{};
-    beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-
-    auto resultBegin = commandBuffersU[0]->begin(beginInfo);
-    utils::vkEnsure(resultBegin);
 
     std::vector<vk::BufferCopy> copyRegions;
     vk::BufferCopy copyRegion;
@@ -375,23 +428,32 @@ void copyBuffer(vk::Buffer &srcBuffer, vk::Buffer &dstBuffer, const vk::DeviceSi
     copyRegion.dstOffset = {};
     copyRegion.size = size;
     copyRegions.push_back(copyRegion);
+    {
+        utils::SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
+        // This has a ver. 2 variant
+        singleTime.coBuf.copyBuffer(srcBuffer, dstBuffer, copyRegions.size(), copyRegions.data());
+    }
+}
 
-    // This has a ver. 2 variant
-    commandBuffersU[0]->copyBuffer(srcBuffer, dstBuffer, copyRegions.size(), copyRegions.data());
-
-    auto resultEnd = commandBuffersU[0]->end();
-    utils::vkEnsure(resultEnd);
-
-    vk::SubmitInfo submitInfo{};
-    submitInfo.commandBufferCount = commandBuffersU.size();
-    auto commandBuffers = uniqueToRaw(commandBuffersU);
-    submitInfo.pCommandBuffers = commandBuffers.data();
-
-    auto resultSubmit = graphicsQueue.submit(1, &submitInfo, nullptr);
-    utils::vkEnsure(resultSubmit);
-    auto resultWait = graphicsQueue.waitIdle();
-    utils::vkEnsure(resultWait);
-
+void copyImageFromBuffer(vk::Buffer &srcBuffer, vk::Image &dstImage, const vk::Extent3D &extent,
+                         vk::CommandPool &commandPool, vk::Device &device, vk::Queue &graphicsQueue){
+    std::vector<vk::BufferImageCopy> copyRegions;
+    vk::BufferImageCopy copyRegion;
+    copyRegion.bufferOffset = 0;
+    copyRegion.bufferRowLength = 0;
+    copyRegion.bufferImageHeight = 0;
+    copyRegion.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    copyRegion.imageSubresource.mipLevel = 0;
+    copyRegion.imageSubresource.baseArrayLayer = 0;
+    copyRegion.imageSubresource.layerCount = 1;
+    copyRegion.imageOffset = vk::Offset3D{0, 0, 0};
+    copyRegion.imageExtent = extent;
+    copyRegions.push_back(copyRegion);
+    {
+        utils::SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
+        // This has a ver. 2 variant
+        singleTime.coBuf.copyBufferToImage(srcBuffer, dstImage, vk::ImageLayout::eTransferDstOptimal, copyRegions);
+    }
 }
 
 std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffernMemoryFromHostData(
@@ -428,6 +490,96 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffernMemoryFromHost
             physicalDevice);
     copyBuffer(stageBuffer.get(), buffer.get(), size, commandPool, device, graphicsQueue);
     return std::make_tuple(std::move(buffer), std::move(bufferMemory));
+}
+
+void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+                           vk::Device &device,
+                           vk::CommandPool &commandPool,
+                           vk::Queue &graphicsQueue) {
+
+    vk::ImageMemoryBarrier barrier{};
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    vk::PipelineStageFlags sourceStage;
+    vk::PipelineStageFlags destinationStage;
+
+    if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+        barrier.srcAccessMask = {};
+        barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+        sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+        destinationStage = vk::PipelineStageFlagBits::eTransfer;
+    } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+        barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+        barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+        sourceStage = vk::PipelineStageFlagBits::eTransfer;
+        destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+    } else {
+        std::abort();
+    }
+
+    {
+        utils::SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
+        singleTime.coBuf.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+}
+
+std::tuple<vk::UniqueImage, vk::UniqueDeviceMemory> createImagenMemoryFromHostData(
+        vk::Extent3D extent,
+        vk::DeviceSize size,
+        void* hostData,
+        vk::Format format,
+        vk::ImageTiling tiling,
+        vk::ImageLayout layout,
+        vk::ImageUsageFlags usage,
+        vk::MemoryPropertyFlags properties,
+        uint32_t queueFamilyIdx,
+        vk::Device &device,
+        vk::PhysicalDevice physicalDevice,
+        vk::CommandPool &commandPool,
+        vk::Queue &graphicsQueue) {
+    using BufUsage = vk::BufferUsageFlagBits;
+    using ImgUsage = vk::ImageUsageFlagBits;
+    using MemProp = vk::MemoryPropertyFlagBits;
+    auto [stageBuffer, stageBufferMemory] = createBuffernMemory(
+            size,
+            BufUsage::eTransferSrc,
+            MemProp::eHostVisible | MemProp::eHostCoherent,
+            queueFamilyIdx,
+            device,
+            physicalDevice);
+    {
+        auto [resultMap, data] = device.mapMemory(stageBufferMemory.get(), 0, size);
+        utils::vkEnsure(resultMap);
+        std::memcpy(data, hostData, size);
+        device.unmapMemory(stageBufferMemory.get());
+    }
+    auto [image, imageMemory] = createImagenMemory(
+            extent, format, tiling, layout,
+            ImgUsage::eTransferDst | usage,
+            properties,
+            queueFamilyIdx,
+            device,
+            physicalDevice);
+    transitionImageLayout(image.get(), format,
+                          vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+                          device, commandPool, graphicsQueue);
+    copyImageFromBuffer(stageBuffer.get(), image.get(), extent, commandPool, device, graphicsQueue);
+    transitionImageLayout(image.get(), format,
+                          vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+                          device, commandPool, graphicsQueue);
+    return std::make_tuple(std::move(image), std::move(imageMemory));
 }
 
 std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexInputBuffer(
@@ -536,34 +688,7 @@ void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPas
     auto endResult = commandBuffer.end();
     utils::vkEnsure(endResult);
 }
-void createDescriptorSets(vk::Device &device) {
-    std::vector<vk::DescriptorSetLayout> layouts(render::MAX_FRAMES_IN_FLIGHT, render::descriptorSetLayoutU.get());
-    vk::DescriptorSetAllocateInfo allocInfo{};
-    allocInfo.descriptorPool = render::descriptorPoolU.get();
-    allocInfo.descriptorSetCount = layouts.size();
-    allocInfo.pSetLayouts = layouts.data();
 
-    auto [result, descriptorSets] = device.allocateDescriptorSetsUnique(allocInfo);
-    utils::vkEnsure(result);
-    render::descriptorSetsU = std::move(descriptorSets);
-
-    for (size_t i = 0; i < render::MAX_FRAMES_IN_FLIGHT; i++) {
-        vk::DescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = render::uniformBuffersU[i].get();
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(ModelUBO);
-
-        vk::WriteDescriptorSet descriptorWrite{};
-        descriptorWrite.dstSet = render::descriptorSetsU[i].get();
-        descriptorWrite.dstBinding = 0;
-        descriptorWrite.dstArrayElement = 0;
-        descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
-        descriptorWrite.descriptorCount = 1;
-        descriptorWrite.pBufferInfo = &bufferInfo;
-
-        device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
-    }
-}
 std::vector<vk::UniqueCommandBuffer> createCommandBuffers(
         vk::CommandPool &commandPool, vk::Device &device) {
 
@@ -579,21 +704,42 @@ std::vector<vk::UniqueCommandBuffer> createCommandBuffers(
 
     return std::move(commandBuffers);
 }
+vk::UniqueSampler createTextureSampler(
+        vk::Device &device,
+        vk::PhysicalDevice &physicalDevice) {
+
+    auto properties = physicalDevice.getProperties();
+
+    vk::SamplerCreateInfo samplerInfo{};
+    samplerInfo.magFilter = vk::Filter::eLinear;
+    samplerInfo.minFilter = vk::Filter::eLinear;
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.anisotropyEnable = VK_TRUE;
+    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = vk::CompareOp::eAlways;
+    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+    auto [result, sampler] = device.createSamplerUnique(samplerInfo);
+    utils::vkEnsure(result);
+    return std::move(sampler);
+}
 namespace render {
     class TextureObject {
     public:
         vk::UniqueSampler sampler{};
 
         vk::UniqueImage image{};
-        vk::UniqueBuffer buffer{};
-        vk::ImageLayout imageLayout{vk::ImageLayout::eUndefined};
 
-        vk::MemoryAllocateInfo mem_alloc{};
+        vk::ImageLayout imageLayout{vk::ImageLayout::eUndefined};
+        //vk::MemoryAllocateInfo mem_alloc{};
         vk::UniqueDeviceMemory mem{};
         vk::UniqueImageView view{};
 
-        uint32_t texWidth{0};
-        uint32_t texHeight{0};
+        vk::Extent3D extent{};
         uint32_t texChannels{0};
 
         explicit TextureObject(const std::string &filePath){
@@ -602,21 +748,28 @@ namespace render {
                 int ok;
                 ok = stbi_info(filePath.c_str(), &width, &height, &channels);
                 if (ok == 1 && channels == 4) {
-                    pixels = stbi_load(filePath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+                    pixels_ = stbi_load(filePath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
                 } else {
                     std::abort();
                 }
-                texWidth = width;
-                texHeight = height;
+                extent.width = width;
+                extent.height = height;
                 texChannels = channels;
+                extent.depth = 1;
             }
-            auto devSize = vk::DeviceSize{texWidth*texHeight*texChannels};
-            using BufUsage = vk::BufferUsageFlagBits;
+            auto devSize = vk::DeviceSize{extent.width*extent.height*extent.depth*texChannels};
+            using ImgUsage = vk::ImageUsageFlagBits;
             using MemProp = vk::MemoryPropertyFlagBits;
-//            std::tie(buffer, mem) = createBuffernMemoryFromHostData(devSize, BufUsage::eTransferSrc,
-//                                                        MemProp::eHostCoherent | MemProp::eHostVisible,
-//                                                        queueFamilyIndexGT, renderDevice, renderPhysicalDevice);
-
+            auto format = vk::Format::eR8G8B8A8Srgb;
+            auto tiling = vk::ImageTiling::eOptimal;
+            auto usage = ImgUsage::eTransferDst | ImgUsage::eSampled;
+            auto properties = MemProp::eDeviceLocal;
+            std::tie(image, mem) = createImagenMemoryFromHostData(
+                    extent, devSize, (void*)pixels_, format, tiling, imageLayout, usage, properties,
+                    queueFamilyIndexGT, renderDevice, renderPhysicalDevice, renderCommandPool, renderQueue);
+            imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal; // Set by createImagenMemoryFromHostData
+            view = std::move(createImageViews(std::span{&image.get(), 1}, format, renderDevice)[0]);
+            sampler = createTextureSampler(renderDevice, renderPhysicalDevice);
         }
         TextureObject() = default;
         TextureObject(const TextureObject &) = delete;
@@ -625,16 +778,13 @@ namespace render {
             if (this != &other){
                 sampler = std::move(other.sampler);
                 image = std::move(other.image);
-                buffer = std::move(other.buffer);
                 imageLayout = other.imageLayout;
-                mem_alloc = other.mem_alloc;
                 mem = std::move(other.mem);
                 view = std::move(other.view);
-                texWidth = other.texWidth;
-                texHeight = other.texHeight;
+                extent = other.extent;
                 texChannels = other.texChannels;
-                pixels = other.pixels;
-                other.pixels = nullptr;
+                pixels_ = other.pixels_;
+                other.pixels_ = nullptr;
             }
             return *this;
         }
@@ -642,13 +792,62 @@ namespace render {
             *this = std::move(other);
         }
         ~TextureObject(){
-            if (pixels != nullptr) {
-                stbi_image_free(pixels);
+            if (pixels_ != nullptr) {
+                stbi_image_free(pixels_);
             }
         }
     private:
-        stbi_uc* pixels{};
+        stbi_uc* pixels_{};
+
     };
+    TextureObject testTexture{};
+}
+void createDescriptorSets(vk::Device &device) {
+    std::vector<vk::DescriptorSetLayout> layouts(render::MAX_FRAMES_IN_FLIGHT, render::descriptorSetLayoutU.get());
+    vk::DescriptorSetAllocateInfo allocInfo{};
+    allocInfo.descriptorPool = render::descriptorPoolU.get();
+    allocInfo.descriptorSetCount = layouts.size();
+    allocInfo.pSetLayouts = layouts.data();
+
+    auto [result, descriptorSets] = device.allocateDescriptorSetsUnique(allocInfo);
+    utils::vkEnsure(result);
+    render::descriptorSetsU = std::move(descriptorSets);
+
+}
+void updateDescriptorSetBuffer(vk::DescriptorSet &descriptorSet, vk::Buffer &buffer, size_t size, uint32_t binding,
+                               vk::Device &device) {
+    vk::DescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = size;
+
+    vk::WriteDescriptorSet descriptorWrite{};
+    descriptorWrite.dstSet = descriptorSet;
+    descriptorWrite.dstBinding = 0;
+    descriptorWrite.dstArrayElement = 0;
+    descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.pBufferInfo = &bufferInfo;
+
+    device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+}
+void updateDescriptorSetImage(vk::DescriptorSet &descriptorSet,
+                              vk::ImageView &imageView, vk::Sampler &sampler, vk::ImageLayout &layout, uint32_t binding,
+                              vk::Device &device) {
+    vk::DescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = layout;
+    imageInfo.imageView = imageView;
+    imageInfo.sampler = sampler;
+
+    vk::WriteDescriptorSet descriptorWrite{};
+    descriptorWrite.dstSet = descriptorSet;
+    descriptorWrite.dstBinding = 1;
+    descriptorWrite.dstArrayElement = 0;
+    descriptorWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.pImageInfo = &imageInfo;
+
+    device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
 }
 void createSyncObjects(vk::Device &device) {
     using namespace render;
@@ -693,7 +892,13 @@ void setupRender(
     {
         render::sceneVPs.resize(render::MAX_FRAMES_IN_FLIGHT);
     }
+    render::testTexture = render::TextureObject{"textures/test_512.png"};
     createDescriptorSets(device);
+    for (size_t i = 0; i < render::MAX_FRAMES_IN_FLIGHT; ++i){
+        auto descriptorSet = render::descriptorSetsU[i].get();
+        updateDescriptorSetBuffer(descriptorSet, render::uniformBuffersU[i].get(), sizeof(ModelUBO), 0, device);
+        updateDescriptorSetImage(descriptorSet, render::testTexture.view.get(), render::testTexture.sampler.get(), render::testTexture.imageLayout, 1, device);
+    }
     createSyncObjects(device);
     {
         using namespace render;
@@ -753,6 +958,7 @@ void cleanupRender(){
     auto vertBuffMem = std::move(render::vertexBufferMemoryU);
     auto vertIdxBuff = std::move(render::vertexIdxBufferU);
     auto vertIdxBuffMem = std::move(render::vertexIdxBufferMemoryU);
+    auto testTexture = std::move(render::testTexture);
 }
 
 #endif //VKLEARN_RENDERER_HPP
