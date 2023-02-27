@@ -22,6 +22,11 @@ Add the following to the CMake options:
 
 The rest are trivial stuffs.
 
+## Some design choices:
+- Uses `SPIRV-Cross` instead of `SPIRV-Reflect` for shader parameter inspection.
+- Right-hand coordinate convention with vanilla Vulkan screen space coordinate rules.
+- Aggressive use of vendor-agnostic Vulkan features and extensions.
+
 ## Current state:
 - Uses some features in Vulkan1.3 to make life a bit easier.
 - Can display a hard-coded textured mesh with Model-View-Projection matrices in effect.

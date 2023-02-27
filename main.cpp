@@ -135,21 +135,23 @@ std::tuple<uint32_t, uint32_t> findQueueFamilyInfo(
 }
 
 //TODO: add extension query for OpenVR
+//Remember, most extensions require respective features to work
 std::vector<std::string> getRequiredDeviceExtensions(){
-    std::vector< std::string > requiredDeviceExtensions;
-    requiredDeviceExtensions.push_back( VK_KHR_SWAPCHAIN_EXTENSION_NAME );
-    // Vulkan Ray Tracing (https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/#raytracingsetup)
-    requiredDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-    requiredDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-    requiredDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-
-    requiredDeviceExtensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
-    //requiredDeviceExtensions.push_back(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME);
+    std::vector< std::string > requiredDeviceExtensions{
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        // Vulkan Ray Tracing (https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/#raytracingsetup)
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+        // We want a decent support of dynamic state
+        VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME
+    };
     return requiredDeviceExtensions;
 }
 
 // A jank way to store a linked list of VkPhysDevFeatures, the first element can be retrieved by std::any_cast<vk::PhysicalDeviceFeatures2&>.
-// Should use vk::StructureChain instead.
+// Should use vk::StructureChain instead. Do not copy the returned list!
 std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &device){
     using Feature2 = vk::PhysicalDeviceFeatures2;
     // https://vulkan.lunarg.com/doc/view/1.3.239.0/windows/1.3-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pNext-02829
@@ -160,6 +162,8 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     using Vulkan13 = vk::PhysicalDeviceVulkan13Features;
     using ASFeature = vk::PhysicalDeviceAccelerationStructureFeaturesKHR;
     using RTPFeature = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR;
+    using VIDSFeature = vk::PhysicalDeviceVertexInputDynamicStateFeaturesEXT;
+    // Add your feature requirements below
     auto featureList = std::vector<std::any>{};
     featureList.push_back(Feature2{});
     featureList.push_back(ASFeature{});
@@ -167,11 +171,15 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     featureList.push_back(Vulkan11{});
     featureList.push_back(Vulkan12{});
     featureList.push_back(Vulkan13{});
+    featureList.push_back(VIDSFeature{});
+    // And here
     std::any_cast<Feature2&>(featureList[0]).pNext = (void*)&std::any_cast<ASFeature&>(featureList[1]);
     std::any_cast<ASFeature&>(featureList[1]).pNext = (void*)&std::any_cast<RTPFeature&>(featureList[2]);
     std::any_cast<RTPFeature&>(featureList[2]).pNext = (void*)&std::any_cast<Vulkan11&>(featureList[3]);
     std::any_cast<Vulkan11&>(featureList[3]).pNext = (void*)&std::any_cast<Vulkan12&>(featureList[4]);
     std::any_cast<Vulkan12&>(featureList[4]).pNext = (void*)&std::any_cast<Vulkan13&>(featureList[5]);
+    std::any_cast<Vulkan13&>(featureList[5]).pNext = (void*)&std::any_cast<VIDSFeature&>(featureList[6]);
+    // And here
     device.getFeatures2(&std::any_cast<Feature2&>(featureList[0]));
     return featureList;
 }
@@ -217,7 +225,7 @@ vk::UniqueDebugUtilsMessengerEXT createVulkanDebugMsg(const vk::Instance &vkInst
 
     auto createInfo = vk::DebugUtilsMessengerCreateInfoEXT{
             {},
-            SeverityBits::eWarning | SeverityBits::eError | SeverityBits::eInfo | SeverityBits::eVerbose,
+            SeverityBits::eWarning | SeverityBits::eError, // | SeverityBits::eInfo | SeverityBits::eVerbose,
             MsgTypeBits::eGeneral | MsgTypeBits::ePerformance | MsgTypeBits::eValidation | MsgTypeBits::eDeviceAddressBinding,
             &utils::debugUtilsMessengerCallback
     };

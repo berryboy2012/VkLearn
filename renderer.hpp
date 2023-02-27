@@ -206,11 +206,9 @@ vk::UniqueDescriptorPool createDescriptorPool(vk::Device &device, const uint32_t
 
 std::tuple<vk::UniquePipelineLayout, vk::UniquePipeline>
 createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::RenderPass &renderPass) {
-    auto vertShaderCode = utils::readFile("shaders/shader.vert.spv");
-    auto fragShaderCode = utils::readFile("shaders/shader.frag.spv");
-
-    auto vertShaderModule = utils::createShaderModule(vertShaderCode, device);
-    auto fragShaderModule = utils::createShaderModule(fragShaderCode, device);
+    auto testShaderModule = utils::createShaderModule("shaders/testAttr.vert.spv", device);
+    auto vertShaderModule = utils::createShaderModule("shaders/shader.vert.spv", device);
+    auto fragShaderModule = utils::createShaderModule("shaders/shader.frag.spv", device);
 
     vk::PipelineShaderStageCreateInfo shaderStages[] = {
             {
@@ -802,7 +800,7 @@ namespace render {
     };
     TextureObject testTexture{};
 }
-void createDescriptorSets(vk::Device &device) {
+std::vector<vk::UniqueDescriptorSet> createDescriptorSets(vk::Device &device) {
     std::vector<vk::DescriptorSetLayout> layouts(render::MAX_FRAMES_IN_FLIGHT, render::descriptorSetLayoutU.get());
     vk::DescriptorSetAllocateInfo allocInfo{};
     allocInfo.descriptorPool = render::descriptorPoolU.get();
@@ -811,7 +809,7 @@ void createDescriptorSets(vk::Device &device) {
 
     auto [result, descriptorSets] = device.allocateDescriptorSetsUnique(allocInfo);
     utils::vkEnsure(result);
-    render::descriptorSetsU = std::move(descriptorSets);
+    return std::move(descriptorSets);
 
 }
 void updateDescriptorSetBuffer(vk::DescriptorSet &descriptorSet, vk::Buffer &buffer, size_t size, uint32_t binding,
@@ -893,7 +891,7 @@ void setupRender(
         render::sceneVPs.resize(render::MAX_FRAMES_IN_FLIGHT);
     }
     render::testTexture = render::TextureObject{"textures/test_512.png"};
-    createDescriptorSets(device);
+    render::descriptorSetsU = createDescriptorSets(device);
     for (size_t i = 0; i < render::MAX_FRAMES_IN_FLIGHT; ++i){
         auto descriptorSet = render::descriptorSetsU[i].get();
         updateDescriptorSetBuffer(descriptorSet, render::uniformBuffersU[i].get(), sizeof(ModelUBO), 0, device);

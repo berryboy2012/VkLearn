@@ -9,24 +9,58 @@
 #include <functional>
 #include <any>
 #include <fstream>
+#include <format>
+#include <map>
 #include "glm/glm.hpp"
+#include "spirv_glsl.hpp"
 
 namespace utils {
-    struct TextureObjectOld {
-        vk::Sampler sampler;
-
-        vk::Image image;
-        vk::Buffer buffer;
-        vk::ImageLayout imageLayout{vk::ImageLayout::eUndefined};
-
-        vk::MemoryAllocateInfo mem_alloc;
-        vk::DeviceMemory mem;
-        vk::ImageView view;
-
-        uint32_t tex_width{0};
-        uint32_t tex_height{0};
+    const std::unordered_map<spirv_cross::SPIRType::BaseType, const std::string> spirvTypeNameMap = {
+            {spirv_cross::SPIRType::BaseType::Unknown, "Unknown"},
+            {spirv_cross::SPIRType::BaseType::Void, "Void"},
+            {spirv_cross::SPIRType::BaseType::Boolean, "Boolean"},
+            {spirv_cross::SPIRType::BaseType::SByte, "SByte"},
+            {spirv_cross::SPIRType::BaseType::UByte, "UByte"},
+            {spirv_cross::SPIRType::BaseType::Short, "Short"},
+            {spirv_cross::SPIRType::BaseType::UShort, "UShort"},
+            {spirv_cross::SPIRType::BaseType::Int, "Int"},
+            {spirv_cross::SPIRType::BaseType::UInt, "UInt"},
+            {spirv_cross::SPIRType::BaseType::Int64, "Int64"},
+            {spirv_cross::SPIRType::BaseType::UInt64, "UInt64"},
+            {spirv_cross::SPIRType::BaseType::AtomicCounter, "AtomicCounter"},
+            {spirv_cross::SPIRType::BaseType::Half, "Half"},
+            {spirv_cross::SPIRType::BaseType::Float, "Float"},
+            {spirv_cross::SPIRType::BaseType::Double, "Double"},
+            {spirv_cross::SPIRType::BaseType::Struct, "Struct"},
+            {spirv_cross::SPIRType::BaseType::Image, "Image"},
+            {spirv_cross::SPIRType::BaseType::SampledImage, "SampledImage"},
+            {spirv_cross::SPIRType::BaseType::Sampler, "Sampler"},
+            {spirv_cross::SPIRType::BaseType::AccelerationStructure, "AccelerationStructure"},
+            {spirv_cross::SPIRType::BaseType::RayQuery, "RayQuery"}
     };
-
+    const std::unordered_map<spirv_cross::SPIRType::BaseType, size_t> spirvTypeSizeMap = {
+            //{spirv_cross::SPIRType::BaseType::Unknown, 0},
+            //{spirv_cross::SPIRType::BaseType::Void, 0},
+            //{spirv_cross::SPIRType::BaseType::Boolean, 0},
+            {spirv_cross::SPIRType::BaseType::SByte, 1},
+            {spirv_cross::SPIRType::BaseType::UByte, 1},
+            {spirv_cross::SPIRType::BaseType::Short, 2},
+            {spirv_cross::SPIRType::BaseType::UShort, 2},
+            {spirv_cross::SPIRType::BaseType::Int, 4},
+            {spirv_cross::SPIRType::BaseType::UInt, 4},
+            {spirv_cross::SPIRType::BaseType::Int64, 8},
+            {spirv_cross::SPIRType::BaseType::UInt64, 8},
+            //{spirv_cross::SPIRType::BaseType::AtomicCounter, 0},
+            {spirv_cross::SPIRType::BaseType::Half, 2},
+            {spirv_cross::SPIRType::BaseType::Float, 4},
+            {spirv_cross::SPIRType::BaseType::Double, 8},
+            {spirv_cross::SPIRType::BaseType::Struct, 0},
+            //{spirv_cross::SPIRType::BaseType::Image, 0},
+            //{spirv_cross::SPIRType::BaseType::SampledImage, 0},
+            //{spirv_cross::SPIRType::BaseType::Sampler, 0},
+            //{spirv_cross::SPIRType::BaseType::AccelerationStructure, 0},
+            //{spirv_cross::SPIRType::BaseType::RayQuery, 0}
+    };
     struct SwapchainImageResources {
         vk::Image image;
         vk::CommandBuffer cmd;
@@ -102,8 +136,8 @@ namespace utils {
         return VK_TRUE;
     }
 
-    std::vector<char> readFile(const std::string& filename) {
-        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+    std::vector<char> readFile(const std::string& filePath) {
+        std::ifstream file(filePath, std::ios::ate | std::ios::binary);
 
         if (!file.is_open()) {
             throw std::runtime_error("failed to open file!");
@@ -147,12 +181,150 @@ namespace utils {
             std::abort();
         }
     }
-    vk::UniqueShaderModule createShaderModule(const std::vector<char>& code, vk::Device &device) {
-        auto [result, shaderModule] = device.createShaderModuleUnique({vk::ShaderModuleCreateFlags(), code.size(), reinterpret_cast<const uint32_t*>(code.data())});
+
+    void probeLayout(spirv_cross::CompilerGLSL &glsl, spirv_cross::SPIRType &objType, size_t &offset, size_t &size){
+        if (objType.basetype==spirv_cross::SPIRType::BaseType::Struct){
+            auto memberSize = objType.member_types.size();
+            for (size_t i=0; i<memberSize; ++i){
+                auto memberType = glsl.get_type(objType.member_types[i]);
+                std::cout<<std::format("{}: ", glsl.get_member_name(objType.self, i));
+                probeLayout(glsl, memberType, offset, size);
+            }
+        } else {
+            if (spirvTypeSizeMap.contains(objType.basetype)){
+                offset = offset + size;
+                size = spirvTypeSizeMap.at(objType.basetype)*objType.columns*objType.vecsize;
+            }
+            auto name = std::string{};
+            name = spirvTypeNameMap.at(objType.basetype);
+            if (objType.vecsize != 1) {
+                if (objType.columns == 1) {
+                    name = std::format("{}vec{}", name, objType.vecsize);
+                }
+                else {
+                    name = std::format("{}mat{}x{}", name, objType.columns, objType.vecsize);
+                }
+            }
+            std::cout<<std::format("{}: Offset: {} B, Size: {} B\n", name, offset, size);
+        }
+    }
+
+    // TODO: add probing support for SSBO
+    vk::UniqueShaderModule createShaderModule(const std::string &filePath, vk::Device &device) {
+        std::cout<<std::format("\nReading shader bytecode located at {}\n\n", filePath);
+        auto irCode = std::vector<uint32_t>();
+        {
+            std::ifstream file(filePath, std::ios::ate | std::ios::binary);
+            if (!file.is_open()) {
+                std::abort();
+            }
+            auto fileSize = (size_t) file.tellg();
+            std::vector<char> buffer(fileSize);
+
+            file.seekg(0);
+            file.read(buffer.data(), static_cast<std::streamsize>(fileSize));
+            file.close();
+
+            auto byteSize = buffer.size()*sizeof(decltype(buffer)::value_type);
+            irCode.resize(byteSize/sizeof(decltype(irCode)::value_type));
+            std::memcpy(irCode.data(), buffer.data(), byteSize);
+        }
+        spirv_cross::CompilerGLSL glsl(irCode);
+        spirv_cross::ShaderResources resources = glsl.get_shader_resources();
+
+        for (auto &sampler : resources.sampled_images){
+            unsigned set = glsl.get_decoration(sampler.id, spv::DecorationDescriptorSet);
+            unsigned binding = glsl.get_decoration(sampler.id, spv::DecorationBinding);
+            std::cout<<std::format("Combined image sampler: {} at set = {}, binding = {}.\n", sampler.name, set, binding);
+        }
+        {
+            size_t offset{0};
+            size_t varSize{0};
+            for (auto &ubo: resources.uniform_buffers) {
+                auto set = glsl.get_decoration(ubo.id, spv::DecorationDescriptorSet);
+                auto binding = glsl.get_decoration(ubo.id, spv::DecorationBinding);
+                std::cout << std::format("Uniform buffer: {} at set = {}, binding = {};\t", ubo.name, set, binding);
+                auto varTypeId = glsl.get_type(ubo.type_id);
+                auto size = varTypeId.vecsize * varTypeId.columns;
+                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
+                    size *= glsl.get_declared_struct_size(varTypeId);
+                } else{
+                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
+                }
+                std::cout << std::format("Size = {} B, base type is {}.\n", size,
+                                         spirvTypeNameMap.at(varTypeId.basetype));
+                probeLayout(glsl, varTypeId, offset, varSize);
+            }
+        }
+        {
+            size_t offset{0};
+            size_t varSize{0};
+            for (auto &pushConst: resources.push_constant_buffers) {
+                auto set = glsl.get_decoration(pushConst.id, spv::DecorationDescriptorSet);
+                auto binding = glsl.get_decoration(pushConst.id, spv::DecorationBinding);
+                std::cout << std::format("Push constant: {} at set = {}, binding = {};\t", pushConst.name, set, binding);
+                auto varTypeId = glsl.get_type(pushConst.type_id);
+                auto size = varTypeId.vecsize * varTypeId.columns;
+                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
+                    size *= glsl.get_declared_struct_size(varTypeId);
+                } else{
+                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
+                }
+                std::cout << std::format("Size = {} B, base type is {}.\n", size,
+                                         spirvTypeNameMap.at(varTypeId.basetype));
+                probeLayout(glsl, varTypeId, offset, varSize);
+            }
+        }
+        // `in` and `out` won't be struct, stay cool dude.
+        {
+            size_t offset{0};
+            size_t varSize{0};
+            for (auto &inputAttr: resources.stage_inputs) {
+                auto set = glsl.get_decoration(inputAttr.id, spv::DecorationDescriptorSet);
+                auto binding = glsl.get_decoration(inputAttr.id, spv::DecorationBinding);
+                auto location = glsl.get_decoration(inputAttr.id, spv::DecorationLocation);
+                std::cout << std::format("Input attribute: {} at set = {}, binding = {}, location = {};\t",
+                                         inputAttr.name, set, binding, location);
+                auto varTypeId = glsl.get_type(inputAttr.type_id);
+                auto size = varTypeId.vecsize * varTypeId.columns;
+                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct) {
+                    size *= glsl.get_declared_struct_size(varTypeId);
+                } else {
+                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
+                }
+                std::cout << std::format("Size = {} B, base type is {}.\n", size,
+                                         spirvTypeNameMap.at(varTypeId.basetype));
+                probeLayout(glsl, varTypeId, offset, varSize);
+            }
+        }
+        {
+            size_t offset{0};
+            size_t varSize{0};
+            for (auto &outputAttr: resources.stage_outputs) {
+                auto set = glsl.get_decoration(outputAttr.id, spv::DecorationDescriptorSet);
+                auto binding = glsl.get_decoration(outputAttr.id, spv::DecorationBinding);
+                auto location = glsl.get_decoration(outputAttr.id, spv::DecorationLocation);
+                std::cout << std::format("Output attribute: {} at set = {}, binding = {}, location = {};\t",
+                                         outputAttr.name, set, binding, location);
+                auto varTypeId = glsl.get_type(outputAttr.type_id);
+                auto size = varTypeId.vecsize * varTypeId.columns;
+                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct) {
+                    size *= glsl.get_declared_struct_size(varTypeId);
+                } else {
+                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
+                }
+                std::cout << std::format("Size = {} B, base type is {}.\n", size,
+                                         spirvTypeNameMap.at(varTypeId.basetype));
+                probeLayout(glsl, varTypeId, offset, varSize);
+            }
+        }
+
+        auto [result, shaderModule] = device.createShaderModuleUnique({vk::ShaderModuleCreateFlags(),
+                                                                       irCode.size()*sizeof(decltype(irCode)::value_type),
+                                                                       irCode.data()});
         utils::vkEnsure(result, "createShaderModule() failed");
         return std::move(shaderModule);
     }
-
     // Submit the recorded vk::CommandBuffer once dtor is called.
     class SingleTimeCommandBuffer {
     public:
