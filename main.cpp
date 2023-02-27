@@ -29,7 +29,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #include "utils.hpp"
 std::vector<vk::UniqueImageView> createImageViews(
         const std::span<vk::Image>& images,
-        vk::Format format,
+        const vk::Format &format, const vk::ImageAspectFlags &imageAspect,
         vk::Device &device);
 #include "renderer.hpp"
 void queryOVR(){
@@ -413,7 +413,7 @@ createSwapChainnImages(const vk::PhysicalDevice &physicalDevice,
 
 std::vector<vk::UniqueImageView> createImageViews(
         const std::span<vk::Image>& images,
-        vk::Format format,
+        const vk::Format &format, const vk::ImageAspectFlags &imageAspect,
         vk::Device &device) {
     auto imageViews = std::vector<vk::UniqueImageView>{};
     imageViews.resize(images.size());
@@ -424,7 +424,7 @@ std::vector<vk::UniqueImageView> createImageViews(
     createInfo.components.g = vk::ComponentSwizzle::eIdentity;
     createInfo.components.b = vk::ComponentSwizzle::eIdentity;
     createInfo.components.a = vk::ComponentSwizzle::eIdentity;
-    createInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    createInfo.subresourceRange.aspectMask = imageAspect;//vk::ImageAspectFlagBits::eColor;
     createInfo.subresourceRange.baseMipLevel = 0;
     createInfo.subresourceRange.levelCount = 1;
     createInfo.subresourceRange.baseArrayLayer = 0;
@@ -437,7 +437,48 @@ std::vector<vk::UniqueImageView> createImageViews(
     }
     return std::move(imageViews);
 }
-vk::UniqueRenderPass createRenderPassSDL(const vk::Format &swapChainImageFormat, vk::Device &device) {
+vk::Format findSupportedFormat(
+        const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features,
+        const vk::PhysicalDevice &physicalDevice) {
+    for (vk::Format format : candidates) {
+        //vk::FormatProperties props;
+        //vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
+        auto props = physicalDevice.getFormatProperties(format);
+
+        if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features){
+            return format;
+        } else if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features) {
+            return format;
+        }
+    }
+    std::abort();
+}
+
+vk::Format findDepthFormat(const vk::PhysicalDevice &physicalDevice) {
+    return findSupportedFormat(
+            {vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
+            vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment,
+            physicalDevice);
+}
+
+bool hasStencilComponent(vk::Format format) {
+    return format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint;
+}
+std::tuple<
+        vk::UniqueImage,
+        vk::UniqueDeviceMemory,
+        vk::UniqueImageView> createDepthResources(const vk::Extent3D &renderExtent,
+                                                  const uint32_t &queueFamilyIdx, vk::Device &device, const vk::PhysicalDevice &physicalDevice) {
+    auto depthFormat = findDepthFormat(physicalDevice);
+
+    auto [depthImage, depthMemory] = createImagenMemory(
+            renderExtent, depthFormat,
+            vk::ImageTiling::eOptimal, vk::ImageLayout::eUndefined, vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal,
+            queueFamilyIdx, device, physicalDevice);
+    auto depthImageView = std::move(createImageViews(std::span(&depthImage.get(), 1), depthFormat, vk::ImageAspectFlagBits::eDepth, device)[0]);
+    return std::make_tuple(std::move(depthImage), std::move(depthMemory), std::move(depthImageView));
+}
+vk::UniqueRenderPass createRenderPassSDL(const vk::Format &swapChainImageFormat, const vk::Format &depthImageFormat, vk::Device &device) {
     vk::AttachmentDescription colorAttachment = {};
     colorAttachment.format = swapChainImageFormat;
     colorAttachment.samples = vk::SampleCountFlagBits::e1;
@@ -448,43 +489,73 @@ vk::UniqueRenderPass createRenderPassSDL(const vk::Format &swapChainImageFormat,
     colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
     colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
 
+    vk::AttachmentDescription depthAttachment{};
+    depthAttachment.format = depthImageFormat;
+    depthAttachment.samples = vk::SampleCountFlagBits::e1;
+    depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+    depthAttachment.storeOp = vk::AttachmentStoreOp::eDontCare;
+    depthAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+    depthAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+    depthAttachment.initialLayout = vk::ImageLayout::eUndefined;
+    depthAttachment.finalLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+
     vk::AttachmentReference colorAttachmentRef = {};
     colorAttachmentRef.attachment = 0;
     colorAttachmentRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
+
+    vk::AttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout = vk::ImageLayout::eDepthAttachmentOptimal;
 
     vk::SubpassDescription subpass = {};
     subpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
+    vk::SubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests;
+    dependency.srcAccessMask = vk::AccessFlags{};
+    dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests;
+    dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+
+    std::array<vk::AttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
     vk::RenderPassCreateInfo renderPassInfo = {};
-    renderPassInfo.attachmentCount = 1;
-    renderPassInfo.pAttachments = &colorAttachment;
+    renderPassInfo.attachmentCount = attachments.size();
+    renderPassInfo.pAttachments = attachments.data();
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
+    renderPassInfo.dependencyCount = 1;
+    renderPassInfo.pDependencies = &dependency;
 
     auto [result, renderPass] = device.createRenderPassUnique(renderPassInfo);
     utils::vkEnsure(result);
     return std::move(renderPass);
 }
 std::vector<vk::UniqueFramebuffer> createFramebuffers(std::vector<vk::UniqueImageView> &imageViews,
-                                                      const utils::VkImagesPack &imagesPack,
+                                                      vk::ImageView &depthImageView,
+                                                      const vk::Extent2D &extent,
                                                       vk::RenderPass &renderPass,
                                                       vk::Device &device) {
     std::vector<vk::UniqueFramebuffer> framebuffers;
     framebuffers.resize(imageViews.size());
-    //vk::UniqueRenderPass renderPass{};
     // https://stackoverflow.com/a/39559418
     vk::FramebufferCreateInfo framebufferInfo = {};
     framebufferInfo.renderPass = renderPass;
-    framebufferInfo.attachmentCount = 1;
-    framebufferInfo.width = imagesPack.extent.width;
-    framebufferInfo.height = imagesPack.extent.height;
+    framebufferInfo.width = extent.width;
+    framebufferInfo.height = extent.height;
     framebufferInfo.layers = 1;
     for (size_t i = 0; i < imageViews.size(); i++) {
+        std::array<vk::ImageView, 2> attachments = {
+                imageViews[i].get(),
+                depthImageView
+        };
+        framebufferInfo.attachmentCount = attachments.size();
         // Actually can be created without supplying an image.
         // Refer to VK_KHR_imageless_framebuffer for more info.(No extensions needed for ver>=1.2)
-        framebufferInfo.pAttachments = &imageViews[i].get();
+        framebufferInfo.pAttachments = attachments.data();
         auto [result, frameBuffer] = device.createFramebufferUnique(framebufferInfo);
         utils::vkEnsure(result);
         framebuffers[i] = std::move(frameBuffer);
@@ -597,16 +668,19 @@ int main(int argc, char *argv[]) {
     auto vkSurfaceSDL = createSurfaceSDL(p_SDLWindow, vkUniqueInstance.get());
     auto featureList = getRequiredDeviceFeatures2(chosenPhysicalDevice);
     auto deviceExtensions = getRequiredDeviceExtensions();
+    auto [graphQueueIdx, graphQueueCount] = findQueueFamilyInfo(chosenPhysicalDevice, vk::QueueFlagBits::eGraphics);
     auto [vkUniqueDevice, vkQueues] = createVulkanDevicenQueues(chosenPhysicalDevice, deviceExtensions, featureList, vkSurfaceSDL.get());
     // Setup DynamicLoader (device-wide)
     VULKAN_HPP_DEFAULT_DISPATCHER.init(vkUniqueDevice.get());
     auto vkCommandPool = createCommandPool(chosenPhysicalDevice, vkUniqueDevice.get(),vkSurfaceSDL.get());
     // Swapchain for SDL2's surface and corresponding imagesPack
     auto [vkSwapchainSDL, imagesPackSDL] = createSwapChainnImages(chosenPhysicalDevice, vkSurfaceSDL.get(), p_SDLWindow, vkUniqueDevice.get());
-    auto imageViewsSDL = createImageViews(imagesPackSDL.images, imagesPackSDL.format, vkUniqueDevice.get());
-    auto renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
-    auto framebuffersSDL = createFramebuffers(imageViewsSDL, imagesPackSDL, renderPassSDL.get(), vkUniqueDevice.get());
-    auto [graphQueueIdx, graphQueueCount] = findQueueFamilyInfo(chosenPhysicalDevice, vk::QueueFlagBits::eGraphics);
+    auto imageViewsSDL = createImageViews(imagesPackSDL.images, imagesPackSDL.format, vk::ImageAspectFlagBits::eColor, vkUniqueDevice.get());
+    auto depthFormat = findDepthFormat(chosenPhysicalDevice);
+    auto [depthImage, depthMemory, depthImageView] = createDepthResources(
+            {imagesPackSDL.extent.width, imagesPackSDL.extent.height, 1}, graphQueueIdx, vkUniqueDevice.get(), chosenPhysicalDevice);
+    auto renderPassSDL = createRenderPassSDL(imagesPackSDL.format, depthFormat, vkUniqueDevice.get());
+    auto framebuffersSDL = createFramebuffers(imageViewsSDL, depthImageView.get(), imagesPackSDL.extent, renderPassSDL.get(), vkUniqueDevice.get());
     setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), vkQueues[0]);
     //Now for the main loop
     SDL_StartTextInput();
@@ -725,15 +799,20 @@ int main(int argc, char *argv[]) {
             // Destroy vulkan objects related to the swapchain in reverse order
             framebuffersSDL = std::vector<vk::UniqueFramebuffer>{};
             //renderPassSDL = vk::UniqueRenderPass{};
+            depthImageView = {};
+            depthMemory = {};
+            depthImage = {};
             imageViewsSDL = std::vector<vk::UniqueImageView>{};
             //vkCommandPool = {};
 
             // Recreate those vulkan objects
             //vkCommandPool = createCommandPool(chosenPhysicalDevice, vkUniqueDevice.get(),vkSurfaceSDL.get());
             std::tie(vkSwapchainSDL, imagesPackSDL) = createSwapChainnImages(chosenPhysicalDevice, vkSurfaceSDL.get(), p_SDLWindow, vkUniqueDevice.get(), vkSwapchainSDL.get());
-            imageViewsSDL = createImageViews(imagesPackSDL.images, imagesPackSDL.format, vkUniqueDevice.get());
+            imageViewsSDL = createImageViews(imagesPackSDL.images, imagesPackSDL.format, vk::ImageAspectFlagBits::eColor, vkUniqueDevice.get());
+            std::tie(depthImage, depthMemory, depthImageView) = createDepthResources(
+                    {imagesPackSDL.extent.width, imagesPackSDL.extent.height, 1}, graphQueueIdx, vkUniqueDevice.get(), chosenPhysicalDevice);
             //renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
-            framebuffersSDL = createFramebuffers(imageViewsSDL, imagesPackSDL, renderPassSDL.get(), vkUniqueDevice.get());
+            framebuffersSDL = createFramebuffers(imageViewsSDL, depthImageView.get(), imagesPackSDL.extent, renderPassSDL.get(), vkUniqueDevice.get());
             // Re-initialize renderer
             setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), vkQueues[0]);
             frames = 0;

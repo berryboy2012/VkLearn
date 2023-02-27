@@ -58,10 +58,21 @@ struct Vertex {
  * For 3D coordinates, we follow the right hand rules.
  * */
 const std::vector<Vertex> vertices = {
+        //base
         {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
         {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
         {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-        {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 0.0f}}
+        {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 0.0f}},
+        //higher
+        {{0.0f, -0.5f, 0.3f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+        {{0.5f, 0.5f, 0.3f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+        {{-0.5f, 0.5f, 0.3f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+        {{0.0f,0.0f,0.8f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 0.0f}},
+        //lower
+        {{0.0f, -0.5f, -0.3f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+        {{0.5f, 0.5f, -0.3f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+        {{-0.5f, 0.5f, -0.3f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+        {{0.0f,0.0f,0.2f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 0.0f}}
 };
 /*Face culling convention: In OpenGL, the default values are:
  * glCullFace == GL_BACK; glFrontFace == GL_CCW
@@ -72,7 +83,15 @@ const std::vector<uint16_t> vertexIdx = {
         0,1,3,
         1,2,3,
         2,0,3,
-        2,1,0
+        2,1,0,
+        4,5,7,
+        5,6,7,
+        6,4,7,
+        6,5,4,
+        8,9,11,
+        9,10,11,
+        10,8,11,
+        10,9,8
 };
 /*Coordinate system differences between Vulkan and OpenGL (https://vincent-p.github.io/posts/vulkan_perspective_matrix/)
  *
@@ -289,6 +308,13 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = vk::SampleCountFlagBits::e1;
 
+    vk::PipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = vk::CompareOp::eGreater;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
     vk::PipelineColorBlendAttachmentState colorBlendAttachment = {};
     colorBlendAttachment.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
     colorBlendAttachment.blendEnable = VK_FALSE;
@@ -325,6 +351,7 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
     pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.layout = pipelineLayout.get();
     pipelineInfo.renderPass = renderPass;
@@ -346,6 +373,7 @@ uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties,
 
     std::abort();
 }
+
 
 std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffernMemory(
         vk::DeviceSize size,
@@ -390,6 +418,7 @@ std::tuple<vk::UniqueImage, vk::UniqueDeviceMemory> createImagenMemory(
 
     auto imageInfo = vk::ImageCreateInfo{};
     imageInfo.flags = vk::ImageCreateFlags{};
+    assert(extent.depth == 1);
     imageInfo.imageType = vk::ImageType::e2D;
     imageInfo.extent = extent;
     imageInfo.mipLevels = 1;
@@ -660,9 +689,12 @@ void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPas
     renderPassInfo.renderArea = vk::Offset2D{ 0, 0 };
     renderPassInfo.renderArea.extent = renderExtent;
 
-    vk::ClearValue clearColor = { std::array<float, 4>{ 1.0f, 1.0f, 1.0f, 1.0f } };
-    renderPassInfo.clearValueCount = 1;
-    renderPassInfo.pClearValues = &clearColor;
+    std::array<vk::ClearValue, 2> clearValues{};
+    clearValues[0].color = {std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f}};
+    clearValues[1].depthStencil.depth = 0.0f;
+    clearValues[1].depthStencil.stencil = 0;
+    renderPassInfo.clearValueCount = clearValues.size();
+    renderPassInfo.pClearValues = clearValues.data();
 
     commandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
@@ -766,7 +798,7 @@ namespace render {
                     extent, devSize, (void*)pixels_, format, tiling, imageLayout, usage, properties,
                     queueFamilyIndexGT, renderDevice, renderPhysicalDevice, renderCommandPool, renderQueue);
             imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal; // Set by createImagenMemoryFromHostData
-            view = std::move(createImageViews(std::span{&image.get(), 1}, format, renderDevice)[0]);
+            view = std::move(createImageViews(std::span{&image.get(), 1}, format, vk::ImageAspectFlagBits::eColor, renderDevice)[0]);
             sampler = createTextureSampler(renderDevice, renderPhysicalDevice);
         }
         TextureObject() = default;
