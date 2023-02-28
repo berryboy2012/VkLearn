@@ -323,6 +323,12 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffernMemory(
     memAllocInfo.allocationSize = memReqs.size;
     auto memPropFlags = properties;
     memAllocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, memPropFlags, physicalDevice);
+    // https://vulkan.lunarg.com/doc/view/1.3.239.0/windows/1.3-extensions/vkspec.html#VUID-vkBindBufferMemory-bufferDeviceAddress-03339
+    vk::MemoryAllocateFlagsInfo memAllocFlagInfo{};
+    memAllocInfo.pNext = &memAllocFlagInfo;
+    if ((usage & vk::BufferUsageFlagBits::eShaderDeviceAddress) == vk::BufferUsageFlagBits::eShaderDeviceAddress){
+        memAllocFlagInfo.flags |= vk::MemoryAllocateFlagBits::eDeviceAddress;
+    }
     auto [resultMem, bufferMemory] = device.allocateMemoryUnique(memAllocInfo);
     utils::vkEnsure(resultMem);
     auto resultBind = device.bindBufferMemory(buffer.get(),bufferMemory.get(),0);
