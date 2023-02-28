@@ -16,83 +16,8 @@
 #define STBI_ONLY_TGA
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#include "model_data.hpp"
 
-/* About memory alignment rules in Vulkan:
- * For things like vertex buffer, we specify the offset of each variable when creating a pipeline, thus no additional
- * padding rules are needed.
- *
- * For other buffers and images, we have to make sure the alignments are right. Those rules can be found at
- * https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap15.html#interfaces-resources-layout
- *
- * A tl;dr explanation can be found at
- * https://vulkan-tutorial.com/Uniform_buffers/Descriptor_pool_and_sets#page_Alignment-requirements
- "
-  Vulkan expects the data in your structure to be aligned in memory in a specific way, for example:
-    Scalars have to be aligned by N (= 4 bytes given 32bit floats).
-    A vec2 must be aligned by 2N (= 8 bytes)
-    A vec3 or vec4 must be aligned by 4N (= 16 bytes)
-    A nested structure must be aligned by the base alignment of its members rounded up to a multiple of 16.
-    A mat4 matrix must have the same alignment as a vec4.
-"
- * */
-struct Vertex {
-    glm::vec3 pos;
-    glm::vec4 color;
-    glm::vec2 texCoord;
-};
-
-/* Screen coordinate system for vulkan (Zd$\in$[0,1]):
- * Red, Green and Blue correspond to approximate locations of the first three vertices
- *                [-1]
- *                 |
- *                Red
- *                 |
- * [-1]------------0------------[1]>x
- *                 |
- *      Blue       |    Green
- *                 |
- *                [1]
- *                 v
- *                 y
- *
- * For 3D coordinates, we follow the right hand rules.
- * */
-const std::vector<Vertex> vertices = {
-        //base
-        {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-        {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
-        {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-        {{0.0f,0.0f,0.5f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 0.0f}},
-        //higher
-        {{0.0f, -0.5f, 0.3f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-        {{0.5f, 0.5f, 0.3f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
-        {{-0.5f, 0.5f, 0.3f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-        {{0.0f,0.0f,0.8f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 0.0f}},
-        //lower
-        {{0.0f, -0.5f, -0.3f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-        {{0.5f, 0.5f, -0.3f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
-        {{-0.5f, 0.5f, -0.3f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-        {{0.0f,0.0f,0.2f}, {0.5f,0.5f,0.5f,0.5f}, {1.0f, 0.0f}}
-};
-/*Face culling convention: In OpenGL, the default values are:
- * glCullFace == GL_BACK; glFrontFace == GL_CCW
- * So here we follow the same convention and adjust parameters in VkPipelineRasterizationStateCreateInfo
- * accordingly.
- * */
-const std::vector<uint16_t> vertexIdx = {
-        0,1,3,
-        1,2,3,
-        2,0,3,
-        2,1,0,
-        4,5,7,
-        5,6,7,
-        6,4,7,
-        6,5,4,
-        8,9,11,
-        9,10,11,
-        10,8,11,
-        10,9,8
-};
 /*Coordinate system differences between Vulkan and OpenGL (https://vincent-p.github.io/posts/vulkan_perspective_matrix/)
  *
  * Here comes our convention w.r.t. view and projection matrices (suitable for people not working at the CG industry):
@@ -247,7 +172,7 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     vk::PipelineVertexInputStateCreateInfo triangleVertexInputInfo = {};
     auto triangleVertexBindDesc = vk::VertexInputBindingDescription{
         0,//.binding
-        sizeof(Vertex),//.stride
+        sizeof(model_info::PCTVertex),//.stride
         vk::VertexInputRate::eVertex//.inputRate
     };
     auto triangleVertexAttrDescs = std::array<vk::VertexInputAttributeDescription,3>{};
@@ -255,19 +180,19 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
             0,//.location
             0,//.binding
             vk::Format::eR32G32B32Sfloat,//.format
-            (uint32_t)offsetof(Vertex, pos)//.offset
+            (uint32_t)offsetof(model_info::PCTVertex, pos)//.offset
     };
     triangleVertexAttrDescs[1] = {
             1,
             0,
             vk::Format::eR32G32B32A32Sfloat,
-            (uint32_t)offsetof(Vertex, color)
+            (uint32_t)offsetof(model_info::PCTVertex, color)
     };
     triangleVertexAttrDescs[2] = {
             2,
             0,
             vk::Format::eR32G32Sfloat,
-            (uint32_t)offsetof(Vertex, texCoord)
+            (uint32_t)offsetof(model_info::PCTVertex, texCoord)
     };
     triangleVertexInputInfo.vertexBindingDescriptionCount = 1;
     triangleVertexInputInfo.pVertexBindingDescriptions = &triangleVertexBindDesc;
@@ -619,9 +544,9 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexInputBu
     using MemProp = vk::MemoryPropertyFlagBits;
     //TODO: use VMA instead
 
-    auto verticesSize = sizeof(Vertex)*vertices.size();
+    auto verticesSize = sizeof(model_info::PCTVertex) * model_info::vertices.size();
     auto [buffer, bufferMemory] = createBuffernMemoryFromHostData(
-            verticesSize, (void*)vertices.data(),
+            verticesSize, (void*)model_info::vertices.data(),
             BufUsage::eVertexBuffer, MemProp::eDeviceLocal,
             queueFamilyIdx, device, physicalDevice, commandPool, graphicsQueue);
 
@@ -637,9 +562,9 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createTriangleVertexIdxBuff
     using MemProp = vk::MemoryPropertyFlagBits;
     //TODO: use VMA instead
 
-    auto vertIdxSize = sizeof(decltype(vertexIdx)::value_type) * vertexIdx.size();
+    auto vertIdxSize = sizeof(decltype(model_info::vertexIdx)::value_type) * model_info::vertexIdx.size();
     auto [buffer, bufferMemory] = createBuffernMemoryFromHostData(
-            vertIdxSize, (void*)vertexIdx.data(),
+            vertIdxSize, (void*)model_info::vertexIdx.data(),
             BufUsage::eIndexBuffer, MemProp::eDeviceLocal,
             queueFamilyIdx, device, physicalDevice, commandPool, graphicsQueue);
 
@@ -706,12 +631,12 @@ void recordCommandBuffer(const vk::Framebuffer &framebuffer, const vk::RenderPas
     // Omit some code since here we only have one vertex buffer
     auto vertBufOffset = vk::DeviceSize{0};
     commandBuffer.bindVertexBuffers(0, 1, &render::vertexBufferU.get(), &vertBufOffset);
-    commandBuffer.bindIndexBuffer(render::vertexIdxBufferU.get(), 0, vk::IndexTypeValue<decltype(vertexIdx)::value_type>::value);
+    commandBuffer.bindIndexBuffer(render::vertexIdxBufferU.get(), 0, vk::IndexTypeValue<decltype(model_info::vertexIdx)::value_type>::value);
     commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, render::graphPipeLayoutU.get(),
                                      0, 1, &render::descriptorSetsU[currentFrame].get(), 0, nullptr);
     commandBuffer.pushConstants(render::graphPipeLayoutU.get(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(ScenePushConstants), &render::sceneVPs[currentFrame]);
 
-    commandBuffer.drawIndexed(vertexIdx.size(), 1, 0, 0, 0);
+    commandBuffer.drawIndexed(model_info::vertexIdx.size(), 1, 0, 0, 0);
 
     commandBuffer.endRenderPass();
 

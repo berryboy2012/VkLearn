@@ -44,12 +44,11 @@ The rest are trivial stuffs.
  scratching head.~~
 - ~~Image, image view and sampler. (Use textures in fragment shader)~~
 - ~~Depth buffering. (Tell GPU which one of the overlapping fragments should be drawn)~~
-- Add Phong lighting pipeline.
+- Add basic ray-tracing pipeline.
 - Add shadow map pipeline.
 - Refactoring the code (with the help of VMA), so we don't lose our sanity when using Vulkan. 
  We cannot do this earlier because we haven't implemented a 'working' renderer yet.
 - OpenVR/OpenXR integration.
-- Ray-tracing integration.
 - FSR/DLSS integration.
 - Be able to view arbitrary 3D models.
 - Further explorations.

@@ -325,7 +325,7 @@ namespace utils {
         utils::vkEnsure(result, "createShaderModule() failed");
         return std::move(shaderModule);
     }
-    // Submit the recorded vk::CommandBuffer once dtor is called.
+    // Submit the recorded vk::CommandBuffer and wait once dtor is called.
     class SingleTimeCommandBuffer {
     public:
         vk::CommandBuffer coBuf{};
