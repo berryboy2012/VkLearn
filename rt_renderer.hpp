@@ -107,7 +107,7 @@ namespace rt_render
 //                                                       | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
         NaiveBuffernMemory scratchBuffer = {};
         std::tie(resultAccel.buffer.buffer, resultAccel.buffer.mem) = createBuffernMemory(
-                accel_.size, vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eStorageBuffer,
+                accel_.size, vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
                 vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice);
         // Setting the buffer
         accel_.buffer = resultAccel.buffer.buffer.get();
@@ -261,9 +261,9 @@ namespace rt_render
         // Allocate the scratch buffers holding the temporary data of the acceleration structure builder
         NaiveBuffernMemory scratchBuffer = {};
         std::tie(scratchBuffer.buffer, scratchBuffer.mem) = createBuffernMemory(
-                maxScratchSize, vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eStorageBuffer,
+                maxScratchSize, vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
                 vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice);
-        vk::BufferDeviceAddressInfo bufferInfo{nullptr, scratchBuffer.buffer.get()};
+        vk::BufferDeviceAddressInfo bufferInfo{scratchBuffer.buffer.get()};
         vk::DeviceAddress           scratchAddress = device.getBufferAddress(bufferInfo);
 
         // Allocate a query pool for storing the needed size for every BLAS compaction.
@@ -419,14 +419,14 @@ namespace rt_render
         {
             auto [buf, mem] = createBuffernMemoryFromHostData(
                     verticesA.size()*sizeof(decltype(verticesA)::value_type), (void*)verticesA.data(),
-                    vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool, queue);
+                    vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR, vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool, queue);
             modelResources[0].vertexBuffer.buffer = std::move(buf);
             modelResources[0].vertexBuffer.mem = std::move(mem);
         }
         {
             auto [buf, mem] = createBuffernMemoryFromHostData(
                     vertexIdx.size()*sizeof(decltype(vertexIdx)::value_type), (void*)vertexIdx.data(),
-                    vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool, queue);
+                    vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR, vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool, queue);
             modelResources[0].indexBuffer.buffer = std::move(buf);
             modelResources[0].indexBuffer.mem = std::move(mem);
         }
@@ -435,14 +435,14 @@ namespace rt_render
         {
             auto [buf, mem] = createBuffernMemoryFromHostData(
                     verticesB.size()*sizeof(decltype(verticesB)::value_type), (void*)verticesB.data(),
-                    vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool, queue);
+                    vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR, vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool, queue);
             modelResources[1].vertexBuffer.buffer = std::move(buf);
             modelResources[1].vertexBuffer.mem = std::move(mem);
         }
         {
             auto [buf, mem] = createBuffernMemoryFromHostData(
                     vertexIdx.size()*sizeof(decltype(vertexIdx)::value_type), (void*)vertexIdx.data(),
-                    vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool, queue);
+                    vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR, vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool, queue);
             modelResources[1].indexBuffer.buffer = std::move(buf);
             modelResources[1].indexBuffer.mem = std::move(mem);
         }
