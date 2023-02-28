@@ -32,6 +32,7 @@ std::vector<vk::UniqueImageView> createImageViews(
         const vk::Format &format, const vk::ImageAspectFlags &imageAspect,
         vk::Device &device);
 #include "renderer.hpp"
+#include "rt_renderer.hpp"
 void queryOVR(){
     vr::EVRInitError eError = vr::VRInitError_None;
     auto m_pHMD = vr::VR_Init( &eError, vr::VRApplication_Utility );
