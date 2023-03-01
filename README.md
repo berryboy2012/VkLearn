@@ -34,6 +34,7 @@ The rest are trivial stuffs.
 - Uses right-hand coordinate with correct equivalent implementation of `glm::lookAt` and `glm::perspective`.
 - Has a messy structure.
 - Tries to split some boilerplate into `main.cpp`, while actual rendering code resides in `renderer.hpp`.
+- Can load geometries into the GPU and build accelerated structures (AS, usually some form of BVH tree) from them.
 
 ## TODO:
 - ~~Vertex staging buffer. (Transfer data from/to GPU's local memory)~~
