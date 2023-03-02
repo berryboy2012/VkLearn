@@ -462,7 +462,6 @@ namespace rt_render {
                              vk::BuildAccelerationStructureFlagsKHR flags,
                              vk::CommandPool &cmdPool, vk::Device &device, uint32_t queueFamilyIdx,
                              const vk::PhysicalDevice &physicalDevice, vk::Queue &queue) {
-        //bool update = false;
 
         AccelStructObj tlas{};
         AccelStructBuildInfo tlasBuilder{};
@@ -495,7 +494,6 @@ namespace rt_render {
         buildInfo.flags = flags;
         buildInfo.geometryCount = 1;
         buildInfo.pGeometries = &topASGeometry;
-        //buildInfo.mode = update ? vk::BuildAccelerationStructureModeKHR::eUpdate : vk::BuildAccelerationStructureModeKHR::eBuild;
         buildInfo.mode = vk::BuildAccelerationStructureModeKHR::eBuild;
         buildInfo.type = vk::AccelerationStructureTypeKHR::eTopLevel;
         //buildInfo.srcAccelerationStructure = VK_NULL_HANDLE;
@@ -568,56 +566,30 @@ namespace rt_render {
         return buildTlas(tlas, vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace, commandPool, device,
                          queueFamilyIdx, physicalDevice, queue);
     }
-    std::vector<ObjModel> loadnPrepModels4RT(vk::Device &device, vk::CommandPool &commandPool, uint32_t queueFamilyIdx, const vk::PhysicalDevice &physicalDevice, vk::Queue &queue){
+
+    std::vector<ObjModel>
+    loadnPrepModels4RT(const std::span<const Model> models, vk::Device &device, vk::CommandPool &commandPool,
+                       uint32_t queueFamilyIdx, const vk::PhysicalDevice &physicalDevice, vk::Queue &queue) {
         std::vector<ObjModel> modelResources{};
-        modelResources.resize(2);
-        {
-            modelResources[0].nbIndices = vertexIdx.size();
-            modelResources[0].nbVertices = verticesA.size();
-            {
-                auto [buf, mem] = createBuffernMemoryFromHostData(
-                        verticesA.size() * sizeof(decltype(verticesA)::value_type), (void *) verticesA.data(),
-                        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress |
-                        vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
-                        vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool,
-                        queue);
-                modelResources[0].vertexBuffer.buffer = std::move(buf);
-                modelResources[0].vertexBuffer.mem = std::move(mem);
-            }
-            {
-                auto [buf, mem] = createBuffernMemoryFromHostData(
-                        vertexIdx.size() * sizeof(decltype(vertexIdx)::value_type), (void *) vertexIdx.data(),
-                        vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress |
-                        vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
-                        vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool,
-                        queue);
-                modelResources[0].indexBuffer.buffer = std::move(buf);
-                modelResources[0].indexBuffer.mem = std::move(mem);
-            }
-        }
-        {
-            modelResources[1].nbIndices = vertexIdx.size();
-            modelResources[1].nbVertices = verticesB.size();
-            {
-                auto [buf, mem] = createBuffernMemoryFromHostData(
-                        verticesB.size() * sizeof(decltype(verticesB)::value_type), (void *) verticesB.data(),
-                        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress |
-                        vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
-                        vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool,
-                        queue);
-                modelResources[1].vertexBuffer.buffer = std::move(buf);
-                modelResources[1].vertexBuffer.mem = std::move(mem);
-            }
-            {
-                auto [buf, mem] = createBuffernMemoryFromHostData(
-                        vertexIdx.size() * sizeof(decltype(vertexIdx)::value_type), (void *) vertexIdx.data(),
-                        vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress |
-                        vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
-                        vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool,
-                        queue);
-                modelResources[1].indexBuffer.buffer = std::move(buf);
-                modelResources[1].indexBuffer.mem = std::move(mem);
-            }
+        modelResources.reserve(models.size());
+        for (auto &model: models) {
+            ObjModel modelInfo{};
+            modelInfo.nbVertices = model.verts.size();
+            modelInfo.nbIndices = model.vertIdxs.size();
+            std::tie(modelInfo.vertexBuffer.buffer, modelInfo.vertexBuffer.mem) = createBuffernMemoryFromHostData(
+                    model.verts.size() * sizeof(decltype(model.verts)::value_type), (void *) model.verts.data(),
+                    vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress |
+                    vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
+                    vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool,
+                    queue);
+            std::tie(modelInfo.indexBuffer.buffer, modelInfo.indexBuffer.mem) = createBuffernMemoryFromHostData(
+                    model.vertIdxs.size() * sizeof(decltype(model.vertIdxs)::value_type),
+                    (void *) model.vertIdxs.data(),
+                    vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress |
+                    vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
+                    vk::MemoryPropertyFlagBits::eDeviceLocal, queueFamilyIdx, device, physicalDevice, commandPool,
+                    queue);
+            modelResources.push_back(std::move(modelInfo));
         }
         return std::move(modelResources);
     }
@@ -631,7 +603,7 @@ namespace rt_render {
             vk::CommandPool &commandPool,
             vk::Queue &CGTQueue) {
         //initRayTracing();
-        auto loadedModels = loadnPrepModels4RT(device, commandPool, queueIdx, physicalDevice, graphicsQueue);
+        auto loadedModels = loadnPrepModels4RT(hanoiModels, device, commandPool, queueIdx, physicalDevice, CGTQueue);
         std::array<ObjInstance, 3> instances = {{
                                                         {glm::identity<glm::mat4x3>(), 0},
                                                         {glm::translate(glm::scale(glm::identity<glm::mat4>(),
