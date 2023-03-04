@@ -17,6 +17,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #include "model_data.hpp"
+#include "shader_modules.hpp"
 
 /*Coordinate system differences between Vulkan and OpenGL (https://vincent-p.github.io/posts/vulkan_perspective_matrix/)
  *
@@ -56,14 +57,6 @@
  *      swap `near` and `far` if not needed)
  *      Thus: A = near/(near-far); B = near*far/(far-near)
  * */
-// Push constants seems to be slower than UBO
-struct ScenePushConstants {
-    glm::mat4 view;
-    glm::mat4 proj;
-};
-struct ModelUBO {
-    glm::mat4 model;
-};
 
 namespace render{
     const uint32_t MAX_FRAMES_IN_FLIGHT = 2;
@@ -101,25 +94,7 @@ namespace render{
     std::vector<vk::Fence> inFlightFences{};
 }
 
-// TODO: let each resource self register layout
-vk::UniqueDescriptorSetLayout createDescriptorSetLayout(vk::Device &device) {
-
-    vk::DescriptorSetLayoutBinding uboLayoutBinding{};
-    uboLayoutBinding.binding = 0;
-    uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
-    uboLayoutBinding.pImmutableSamplers = nullptr;
-    uboLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
-
-    vk::DescriptorSetLayoutBinding samplerLayoutBinding{};
-    samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
-    samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-
-    std::array<vk::DescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
-
+vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device){
     vk::DescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.bindingCount = bindings.size();
     layoutInfo.pBindings = bindings.data();
@@ -148,59 +123,33 @@ vk::UniqueDescriptorPool createDescriptorPool(vk::Device &device, const uint32_t
     return std::move(descriptorPool);
 }
 
-std::tuple<vk::UniquePipelineLayout, vk::UniquePipeline>
+std::tuple<vk::UniqueDescriptorSetLayout, vk::UniquePipelineLayout, vk::UniquePipeline>
 createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::RenderPass &renderPass) {
     auto testShaderModule = utils::createShaderModule("shaders/testAttr.vert.spv", device);
-    auto vertShaderModule = utils::createShaderModule("shaders/shader.vert.spv", device);
-    auto fragShaderModule = utils::createShaderModule("shaders/shader.frag.spv", device);
+    auto vertShader = VertexShader{device}; // shaders/shader.vert
+    auto fragShader = FragShader{device}; // shaders/shader.frag
 
-    vk::PipelineShaderStageCreateInfo shaderStages[] = {
-            {
-                    vk::PipelineShaderStageCreateFlags(),
-                    vk::ShaderStageFlagBits::eVertex,
-                    *vertShaderModule,
-                    "main"
-            },
-            {
-                    vk::PipelineShaderStageCreateFlags(),
-                    vk::ShaderStageFlagBits::eFragment,
-                    *fragShaderModule,
-                    "main"
-            }
-    };
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {{
+        {
+                vk::PipelineShaderStageCreateFlags(),
+                vk::ShaderStageFlagBits::eVertex,
+                vertShader.shaderModule_.get(),
+                "main"
+        },
+        {
+                vk::PipelineShaderStageCreateFlags(),
+                vk::ShaderStageFlagBits::eFragment,
+                fragShader.shaderModule_.get(),
+                "main"
+        }
+    }};
 
     vk::PipelineVertexInputStateCreateInfo triangleVertexInputInfo = {};
-    auto triangleVertexBindDesc = vk::VertexInputBindingDescription{
-        0,//.binding
-        sizeof(model_info::PCTVertex),//.stride
-        vk::VertexInputRate::eVertex//.inputRate
-    };
-    auto triangleVertexAttrDescs = std::array<vk::VertexInputAttributeDescription,3>{};
-    triangleVertexAttrDescs[0] = {
-            0,//.location
-            0,//.binding
-            vk::Format::eR32G32B32Sfloat,//.format
-            (uint32_t)offsetof(model_info::PCTVertex, pos)//.offset
-    };
-    triangleVertexAttrDescs[1] = {
-            1,
-            0,
-            vk::Format::eR32G32B32A32Sfloat,
-            (uint32_t)offsetof(model_info::PCTVertex, color)
-    };
-    triangleVertexAttrDescs[2] = {
-            2,
-            0,
-            vk::Format::eR32G32Sfloat,
-            (uint32_t)offsetof(model_info::PCTVertex, texCoord)
-    };
-    triangleVertexInputInfo.vertexBindingDescriptionCount = 1;
-    triangleVertexInputInfo.pVertexBindingDescriptions = &triangleVertexBindDesc;
-    triangleVertexInputInfo.vertexAttributeDescriptionCount = triangleVertexAttrDescs.size();
-    triangleVertexInputInfo.pVertexAttributeDescriptions = triangleVertexAttrDescs.data();
-    vk::PipelineInputAssemblyStateCreateInfo inputAssembly = {};
-    inputAssembly.topology = vk::PrimitiveTopology::eTriangleList;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    triangleVertexInputInfo.vertexBindingDescriptionCount = vertShader.inputInfos_.size();
+    triangleVertexInputInfo.pVertexBindingDescriptions = vertShader.inputInfos_.data();
+    triangleVertexInputInfo.vertexAttributeDescriptionCount = vertShader.attrInfos_.size();
+    triangleVertexInputInfo.pVertexAttributeDescriptions = vertShader.attrInfos_.data();
 
     vk::Viewport viewport = {};
     viewport.x = 0.0f;
@@ -249,30 +198,34 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     colorBlending.logicOp = vk::LogicOp::eCopy;
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
-    colorBlending.blendConstants[0] = 0.0f;
-    colorBlending.blendConstants[1] = 0.0f;
-    colorBlending.blendConstants[2] = 0.0f;
-    colorBlending.blendConstants[3] = 0.0f;
+    colorBlending.blendConstants = {{ 0.0f,0.0f,0.0f,0.0f }};
 
-    vk::PushConstantRange sceneVPConstants = {};
-    sceneVPConstants.offset = 0;
-    sceneVPConstants.size = sizeof(ScenePushConstants);
-    sceneVPConstants.stageFlags = vk::ShaderStageFlagBits::eVertex;
+    vk::UniqueDescriptorSetLayout descLayout{};
+    {
+        std::vector<vk::DescriptorSetLayoutBinding> bindings{};
+        for (auto &bind: vertShader.descLayouts_) {
+            bindings.push_back(bind);
+        }
+        for (auto &bind: fragShader.descLayouts_) {
+            bindings.push_back(bind);
+        }
+        descLayout = createDescriptorSetLayout(bindings, device);
+    }
 
-    vk::PipelineLayoutCreateInfo pipelineLayoutInfo = {};
+    vk::PipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &render::descriptorSetLayoutU.get();
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &sceneVPConstants;
+    pipelineLayoutInfo.pSetLayouts = &descLayout.get();
+    pipelineLayoutInfo.pushConstantRangeCount = vertShader.pushConstInfos_.size();
+    pipelineLayoutInfo.pPushConstantRanges = vertShader.pushConstInfos_.data();
 
     auto [pLResult, pipelineLayout] = device.createPipelineLayoutUnique(pipelineLayoutInfo);
     utils::vkEnsure(pLResult);
 
     vk::GraphicsPipelineCreateInfo pipelineInfo = {};
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.stageCount = shaderStages.size();
+    pipelineInfo.pStages = shaderStages.data();
     pipelineInfo.pVertexInputState = &triangleVertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pInputAssemblyState = &vertShader.inputAsmInfo_;
     pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
     pipelineInfo.pMultisampleState = &multisampling;
@@ -285,7 +238,7 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
 
     auto [graphPipeResult, graphicsPipeline] = device.createGraphicsPipelineUnique(nullptr, pipelineInfo);
     utils::vkEnsure(graphPipeResult);
-    return std::make_tuple(std::move(pipelineLayout),std::move(graphicsPipeline));
+    return std::make_tuple(std::move(descLayout), std::move(pipelineLayout),std::move(graphicsPipeline));
 }
 uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties, vk::PhysicalDevice physicalDevice) {
     vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
@@ -784,7 +737,7 @@ void updateDescriptorSetBuffer(vk::DescriptorSet &descriptorSet, vk::Buffer &buf
 
     vk::WriteDescriptorSet descriptorWrite{};
     descriptorWrite.dstSet = descriptorSet;
-    descriptorWrite.dstBinding = 0;
+    descriptorWrite.dstBinding = binding;
     descriptorWrite.dstArrayElement = 0;
     descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
     descriptorWrite.descriptorCount = 1;
@@ -802,7 +755,7 @@ void updateDescriptorSetImage(vk::DescriptorSet &descriptorSet,
 
     vk::WriteDescriptorSet descriptorWrite{};
     descriptorWrite.dstSet = descriptorSet;
-    descriptorWrite.dstBinding = 1;
+    descriptorWrite.dstBinding = binding;
     descriptorWrite.dstArrayElement = 0;
     descriptorWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
     descriptorWrite.descriptorCount = 1;
@@ -843,9 +796,9 @@ void setupRender(
         renderCommandPool = commandPool;
         renderQueue = graphicsQueue;
     }
-    render::descriptorSetLayoutU = createDescriptorSetLayout(device);
     render::descriptorPoolU = createDescriptorPool(device, render::MAX_FRAMES_IN_FLIGHT);
-    std::tie(render::graphPipeLayoutU, render::graphPipelineU) = createGraphicsPipeline(device, viewportExtent, renderPass);
+
+    std::tie(render::descriptorSetLayoutU, render::graphPipeLayoutU, render::graphPipelineU) = createGraphicsPipeline(device, viewportExtent, renderPass);
     std::tie(render::vertexBufferU, render::vertexBufferMemoryU) = createTriangleVertexInputBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     std::tie(render::vertexIdxBufferU, render::vertexIdxBufferMemoryU) = createTriangleVertexIdxBuffer(queueIdx, device, physicalDevice, commandPool, graphicsQueue);
     createModelUniformBuffers(device, physicalDevice);

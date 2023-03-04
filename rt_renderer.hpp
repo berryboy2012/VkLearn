@@ -347,7 +347,7 @@ namespace rt_render {
 
         uint32_t maxPrimitiveCount = model.nbIndices / 3;
 
-        // Describe buffer as array of VertexObj.
+        // Describe buffer as an array of VertexObj.
         vk::AccelerationStructureGeometryTrianglesDataKHR triangles{};
         if (model.vertexSize == sizeof(glm::vec3)) {
             triangles.vertexFormat = vk::Format::eR32G32B32Sfloat; // vec3 vertex position data.
@@ -410,7 +410,7 @@ namespace rt_render {
     }
 
     struct ObjInstance {
-        glm::mat4x3 transform;    // Matrix of the instance
+        glm::mat4x3 transform{glm::identity<glm::mat3>()};    // Matrix of the instance
         uint32_t objIndex{0};  // Model index reference
     };
 
@@ -592,6 +592,104 @@ namespace rt_render {
             modelResources.push_back(std::move(modelInfo));
         }
         return std::move(modelResources);
+    }
+
+    std::vector<vk::DescriptorSetLayoutBinding> getDescSetBindInfo(){
+        std::vector<vk::DescriptorSetLayoutBinding> bindings{};
+        {
+            vk::DescriptorSetLayoutBinding accelBinding{};
+            accelBinding.binding = 0;
+            accelBinding.descriptorCount = 1;
+            accelBinding.descriptorType = vk::DescriptorType::eAccelerationStructureKHR;
+            accelBinding.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR | vk::ShaderStageFlagBits::eClosestHitKHR;
+            bindings.push_back(accelBinding);
+        }
+        {
+            vk::DescriptorSetLayoutBinding imageBinding{};
+            imageBinding.binding = 1;
+            imageBinding.descriptorCount = 1;
+            imageBinding.descriptorType = vk::DescriptorType::eStorageImage;
+            imageBinding.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
+            bindings.push_back(imageBinding);
+        }
+        return bindings;
+    }
+
+    vk::UniqueDescriptorPool createDescriptorPool(std::span<const vk::DescriptorSetLayoutBinding> descLayoutBinds,
+                                                  const uint32_t MAX_FRAMES_IN_FLIGHT, vk::Device &device) {
+        std::vector<vk::DescriptorPoolSize> poolSizes{};
+        for (auto& binding: descLayoutBinds){
+            vk::DescriptorPoolSize poolSize{};
+            poolSize.type = binding.descriptorType;
+            poolSize.descriptorCount = MAX_FRAMES_IN_FLIGHT;
+            poolSizes.push_back(poolSize);
+        }
+
+        vk::DescriptorPoolCreateInfo poolInfo{};
+        poolInfo.poolSizeCount = poolSizes.size();
+        poolInfo.pPoolSizes = poolSizes.data();
+        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
+
+        auto [result, descriptorPool] = device.createDescriptorPoolUnique(poolInfo);
+        utils::vkEnsure(result);
+        return std::move(descriptorPool);
+    }
+
+    vk::UniqueDescriptorSetLayout createDescLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device){
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.bindingCount = bindings.size();
+        layoutInfo.pBindings = bindings.data();
+
+        auto [result, descriptorSetLayout] = device.createDescriptorSetLayoutUnique(layoutInfo);
+        utils::vkEnsure(result);
+        return std::move(descriptorSetLayout);
+    }
+
+    std::vector<vk::UniqueDescriptorSet> createDescriptorSets(
+            vk::DescriptorSetLayout layout, vk::DescriptorPool pool,
+            const uint32_t MAX_FRAMES_IN_FLIGHT, vk::Device &device) {
+        std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, layout);
+        vk::DescriptorSetAllocateInfo allocInfo{};
+        allocInfo.descriptorPool = pool;
+        allocInfo.descriptorSetCount = layouts.size();
+        allocInfo.pSetLayouts = layouts.data();
+
+        auto [result, descriptorSets] = device.allocateDescriptorSetsUnique(allocInfo);
+        utils::vkEnsure(result);
+        return std::move(descriptorSets);
+    }
+
+    void updateAccelStructDescSet(AccelStructObj &accel, vk::DescriptorSet &descriptorSet, vk::DescriptorSetLayoutBinding bindInfo, vk::Device &device){
+        vk::WriteDescriptorSetAccelerationStructureKHR descAsInfo{};
+        descAsInfo.accelerationStructureCount = 1;
+        descAsInfo.pAccelerationStructures = &accel.accel.get();
+        vk::WriteDescriptorSet writeInfo{};
+        writeInfo.dstSet = descriptorSet;
+        writeInfo.dstBinding = bindInfo.binding;
+        writeInfo.dstArrayElement = 0;
+        writeInfo.descriptorType = bindInfo.descriptorType;
+        writeInfo.descriptorCount = 1;
+        writeInfo.pNext = &descAsInfo;
+        device.updateDescriptorSets(writeInfo, nullptr);
+    }
+
+    void updateImageDescSet(vk::DescriptorSet &descriptorSet,
+                            vk::ImageView imageView, vk::Sampler sampler, vk::ImageLayout layout,
+                            const vk::DescriptorSetLayoutBinding &bindInfo, vk::Device &device){
+        vk::DescriptorImageInfo descImgInfo{};
+        descImgInfo.imageLayout = layout;
+        descImgInfo.imageView = imageView;
+        descImgInfo.sampler = sampler;
+
+        vk::WriteDescriptorSet writeInfo{};
+        writeInfo.dstSet = descriptorSet;
+        writeInfo.dstBinding = bindInfo.binding;
+        writeInfo.dstArrayElement = 0;
+        writeInfo.descriptorType = bindInfo.descriptorType;
+        writeInfo.descriptorCount = 1;
+        writeInfo.pImageInfo = &descImgInfo;
+        device.updateDescriptorSets(writeInfo, nullptr);
     }
 
     void setupRTRender(

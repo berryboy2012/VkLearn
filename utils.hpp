@@ -209,6 +209,36 @@ namespace utils {
         }
     }
 
+    template <typename T>
+    concept isGlmType = requires (){
+        typename T::value_type;
+        // Just introduce glm namespace, will not use it.
+        {T::length()} -> std::same_as<glm::length_t>;
+    };
+
+    template <typename T>
+    requires isGlmType<T>
+    consteval vk::Format glmTypeToFormat(){
+        if (std::is_same_v<typename T::value_type, float>){
+            const auto totalSize = sizeof(T)/sizeof(typename T::value_type);
+            switch (totalSize) {
+                case 1: return vk::Format::eR32Sfloat;
+                case 2: return vk::Format::eR32G32Sfloat;
+                case 3: return vk::Format::eR32G32B32Sfloat;
+                case 4: return vk::Format::eR32G32B32A32Sfloat;
+                default:
+                    static_assert(totalSize<5 && totalSize > 0);;//MSVC is acting a bit funny here, don't remove the empty expression
+            }
+        }
+    }
+
+    const std::unordered_map<vk::Format, size_t> sizeofVkFormat = {
+        {vk::Format::eR32Sfloat, 4},
+        {vk::Format::eR32G32Sfloat, 8},
+        {vk::Format::eR32G32B32Sfloat, 12},
+        {vk::Format::eR32G32B32A32Sfloat, 16}
+    };
+
     // TODO: add probing support for SSBO
     vk::UniqueShaderModule createShaderModule(const std::string &filePath, vk::Device &device) {
         std::cout<<std::format("\nReading shader bytecode located at {}\n\n", filePath);

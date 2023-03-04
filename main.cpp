@@ -144,6 +144,11 @@ std::vector<std::string> getRequiredDeviceExtensions(){
         VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        // Ray queries
+        VK_KHR_RAY_QUERY_EXTENSION_NAME,
+        VK_KHR_SPIRV_1_4_EXTENSION_NAME,
+        VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
+
         VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
         // We want a decent support of dynamic state
         VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME
@@ -164,6 +169,7 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     using ASFeature = vk::PhysicalDeviceAccelerationStructureFeaturesKHR;
     using RTPFeature = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR;
     using VIDSFeature = vk::PhysicalDeviceVertexInputDynamicStateFeaturesEXT;
+    using RayFeature = vk::PhysicalDeviceRayQueryFeaturesKHR;
     // Add your feature requirements below
     auto featureList = std::vector<std::any>{};
     featureList.push_back(Feature2{});
@@ -173,6 +179,7 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     featureList.push_back(Vulkan12{});
     featureList.push_back(Vulkan13{});
     featureList.push_back(VIDSFeature{});
+    featureList.push_back(RayFeature{});
     // And here
     std::any_cast<Feature2&>(featureList[0]).pNext = (void*)&std::any_cast<ASFeature&>(featureList[1]);
     std::any_cast<ASFeature&>(featureList[1]).pNext = (void*)&std::any_cast<RTPFeature&>(featureList[2]);
@@ -180,6 +187,7 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     std::any_cast<Vulkan11&>(featureList[3]).pNext = (void*)&std::any_cast<Vulkan12&>(featureList[4]);
     std::any_cast<Vulkan12&>(featureList[4]).pNext = (void*)&std::any_cast<Vulkan13&>(featureList[5]);
     std::any_cast<Vulkan13&>(featureList[5]).pNext = (void*)&std::any_cast<VIDSFeature&>(featureList[6]);
+    std::any_cast<VIDSFeature&>(featureList[6]).pNext = (void*)&std::any_cast<RayFeature&>(featureList[7]);
     // And here
     device.getFeatures2(&std::any_cast<Feature2&>(featureList[0]));
     return featureList;
@@ -581,52 +589,6 @@ vk::UniqueCommandPool createCommandPool(vk::PhysicalDevice &chosenDevice, vk::De
     return std::move(commandPool);
 }
 
-std::tuple<
-std::vector<vk::UniqueCommandBuffer>,
-std::tuple<
-    std::vector<vk::UniqueSemaphore>,
-    std::vector<vk::UniqueSemaphore>,
-    std::vector<vk::UniqueFence>>
-> setupRenderEnv(
-        vk::Device &device,
-        vk::CommandPool &commandPool,
-        std::vector<vk::UniqueFramebuffer> &framebuffers){
-    //std::tie(render::graphPipeLayoutU, render::graphPipelineU) = createGraphicsPipeline(device, viewportExtent, renderPass);
-    auto buffersSize = framebuffers.size();
-
-    vk::CommandBufferAllocateInfo allocInfo = {};
-    allocInfo.commandPool = commandPool;
-    allocInfo.level = vk::CommandBufferLevel::ePrimary;
-    allocInfo.commandBufferCount = (uint32_t)buffersSize;
-
-    auto [buffersResult, commandBuffersSwapchain] = device.allocateCommandBuffersUnique(allocInfo);
-    utils::vkEnsure(buffersResult);
-
-    std::tuple<
-            std::vector<vk::UniqueSemaphore>,
-            std::vector<vk::UniqueSemaphore>,
-            std::vector<vk::UniqueFence>
-            > syncObjsSwapchain = createSwapchainSyncObjects(device);
-    return std::make_tuple(std::move(commandBuffersSwapchain), std::move(syncObjsSwapchain));
-}
-
-std::tuple<std::vector<vk::UniqueSemaphore>, std::vector<vk::UniqueSemaphore>, std::vector<vk::UniqueFence>>
-createSwapchainSyncObjects(vk::Device &device, const uint32_t &MAX_FRAMES_LAG) {
-    auto imageAvailableSemaphoresU = std::vector<vk::UniqueSemaphore>();
-    auto renderFinishedSemaphoresU = std::vector<vk::UniqueSemaphore>();
-    auto inFlightFencesU = std::vector<vk::UniqueFence>();
-    for (size_t i = 0; i < MAX_FRAMES_LAG; i++) {
-        auto [availResult, availSemaphore] = device.createSemaphoreUnique({});
-        utils::vkEnsure(availResult);
-        imageAvailableSemaphoresU.push_back(std::move(availSemaphore));
-        auto [finishedResult, finishedSemaphore] = device.createSemaphoreUnique({});
-        utils::vkEnsure(finishedResult);
-        renderFinishedSemaphoresU.push_back(std::move(finishedSemaphore));
-        auto [fenceResult, fence] = device.createFenceUnique({vk::FenceCreateFlagBits::eSignaled});
-        inFlightFencesU.push_back(std::move(fence));
-    }
-    return std::make_tuple(std::move(imageAvailableSemaphoresU),std::move(renderFinishedSemaphoresU),std::move(inFlightFencesU));
-}
 bool wantExitSDL(){
     SDL_Event sdlEvent;
     bool bRet = false;
