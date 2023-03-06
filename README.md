@@ -9,7 +9,6 @@ Use `vcpkg` to install the following libs:
 SDL2[vulkan]
 vulkan-headers
 glm
-vulkan-memory-allocator-hpp
 openvr
 stb
 ```
@@ -19,6 +18,8 @@ Add the following to the CMake options:
 -DCMAKE_TOOLCHAIN_FILE=PATH_2_VCPKG\scripts\buildsystems\vcpkg.cmake
 -DVCPKG_TARGET_TRIPLET=x64-windows
 ```
+
+For submodules located at `libs/`, there should be no need to pull `libs/VulkanMemoryAllocator-Hpp/Vulkan-Hpp`.
 
 The rest are trivial stuffs.
 

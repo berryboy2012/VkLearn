@@ -14,7 +14,6 @@
 // Yup, that pollutes many names
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <vulkan/vulkan.hpp>
-//#include "vulkan-memory-allocator-hpp/vk_mem_alloc.hpp"
 #include <SDL2/SDL_vulkan.h>
 #include <openvr.h>
 
