@@ -24,7 +24,24 @@ public:
     vk::PipelineInputAssemblyStateCreateInfo inputAsmInfo_{};
     // Other less frequent entries
     std::vector<vk::PushConstantRange> pushConstInfos_{};
-
+    VertexShader() = default;
+    VertexShader(const VertexShader &) = delete;
+    VertexShader& operator= (const VertexShader &) = delete;
+    VertexShader(VertexShader &&other) noexcept {
+        *this = std::move(other);
+    }
+    VertexShader& operator= (VertexShader &&other) noexcept {
+        if (this != &other){
+            shaderModule_ = std::move(other.shaderModule_);
+            descLayouts_ = other.descLayouts_;
+            inputInfos_ = other.inputInfos_;
+            attrInfos_ = other.attrInfos_;
+            inputAsmInfo_ = other.inputAsmInfo_;
+            pushConstInfos_ = other.pushConstInfos_;
+            device_ = other.device_;
+        }
+        return *this;
+    }
     explicit VertexShader(vk::Device device){
         std::string filePath = "shaders/shader.vert.spv";
         device_ = device;
@@ -33,6 +50,7 @@ public:
         {
             vk::DescriptorSetLayoutBinding modelUBOInfo{};
             modelUBOInfo.binding = 0;
+            // If you want to specify an array of element objects, descriptorCount is the length of such array.
             modelUBOInfo.descriptorCount = 1;
             modelUBOInfo.descriptorType = vk::DescriptorType::eUniformBuffer;
             modelUBOInfo.pImmutableSamplers = nullptr;
@@ -58,13 +76,13 @@ public:
                 inColorInfo.binding = bindTableInfo.binding;
                 inColorInfo.location = 1;
                 inColorInfo.format = utils::glmTypeToFormat<glm::vec3>();
-                inColorInfo.offset = inPositionInfo.offset + utils::sizeofVkFormat.at(inPositionInfo.format);
+                inColorInfo.offset = inPositionInfo.offset + static_cast<uint32_t>(utils::sizeofVkFormat.at(inPositionInfo.format));
 
                 vk::VertexInputAttributeDescription inTexCoordInfo{};
                 inTexCoordInfo.binding = bindTableInfo.binding;
                 inTexCoordInfo.location = 2;
                 inTexCoordInfo.format = utils::glmTypeToFormat<glm::vec2>();
-                inTexCoordInfo.offset = inColorInfo.offset + utils::sizeofVkFormat.at(inColorInfo.format);
+                inTexCoordInfo.offset = inColorInfo.offset + static_cast<uint32_t>(utils::sizeofVkFormat.at(inColorInfo.format));
                 attrInfos_.push_back(inPositionInfo);
                 attrInfos_.push_back(inColorInfo);
                 attrInfos_.push_back(inTexCoordInfo);
@@ -92,6 +110,20 @@ public:
     std::vector<vk::DescriptorSetLayoutBinding> descLayouts_{};
     // Other less frequent entries
 
+    FragShader() = default;
+    FragShader(const FragShader &) = delete;
+    FragShader& operator= (const FragShader &) = delete;
+    FragShader(FragShader &&other) noexcept {
+        *this = std::move(other);
+    }
+    FragShader& operator= (FragShader &&other) noexcept {
+        if (this != &other){
+            shaderModule_ = std::move(other.shaderModule_);
+            descLayouts_ = other.descLayouts_;
+            device_ = other.device_;
+        }
+        return *this;
+    }
     explicit FragShader(vk::Device device){
         std::string filePath = "shaders/shader.frag.spv";
         device_ = device;

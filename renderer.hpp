@@ -94,16 +94,6 @@ namespace render{
     std::vector<vk::Fence> inFlightFences{};
 }
 
-vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device){
-    vk::DescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.bindingCount = bindings.size();
-    layoutInfo.pBindings = bindings.data();
-
-    auto [result, descriptorSetLayout] = device.createDescriptorSetLayoutUnique(layoutInfo);
-    utils::vkEnsure(result);
-    return std::move(descriptorSetLayout);
-}
-
 // TODO: let each resource self register layout
 vk::UniqueDescriptorPool createDescriptorPool(vk::Device &device, const uint32_t MAX_FRAMES_IN_FLIGHT) {
     std::array<vk::DescriptorPoolSize, 2> poolSizes{};
@@ -209,14 +199,12 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
         for (auto &bind: fragShader.descLayouts_) {
             bindings.push_back(bind);
         }
-        descLayout = createDescriptorSetLayout(bindings, device);
+        descLayout = utils::createDescriptorSetLayout(bindings, device);
     }
 
     vk::PipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descLayout.get();
-    pipelineLayoutInfo.pushConstantRangeCount = vertShader.pushConstInfos_.size();
-    pipelineLayoutInfo.pPushConstantRanges = vertShader.pushConstInfos_.data();
+    pipelineLayoutInfo.setSetLayouts(descLayout.get());
+    pipelineLayoutInfo.setPushConstantRanges(vertShader.pushConstInfos_);
 
     auto [pLResult, pipelineLayout] = device.createPipelineLayoutUnique(pipelineLayoutInfo);
     utils::vkEnsure(pLResult);
@@ -796,6 +784,7 @@ void setupRender(
         renderCommandPool = commandPool;
         renderQueue = graphicsQueue;
     }
+
     render::descriptorPoolU = createDescriptorPool(device, render::MAX_FRAMES_IN_FLIGHT);
 
     std::tie(render::descriptorSetLayoutU, render::graphPipeLayoutU, render::graphPipelineU) = createGraphicsPipeline(device, viewportExtent, renderPass);

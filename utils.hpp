@@ -6,11 +6,13 @@
 #ifndef VKLEARN_UTILS_HPP
 #define VKLEARN_UTILS_HPP
 #include <concepts>
+#include <iostream>
 #include <functional>
 #include <any>
 #include <fstream>
 #include <format>
 #include <map>
+#include <optional>
 #include "glm/glm.hpp"
 #include "spirv_glsl.hpp"
 
@@ -355,6 +357,15 @@ namespace utils {
         utils::vkEnsure(result, "createShaderModule() failed");
         return std::move(shaderModule);
     }
+    vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device){
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.bindingCount = bindings.size();
+        layoutInfo.pBindings = bindings.data();
+
+        auto [result, descriptorSetLayout] = device.createDescriptorSetLayoutUnique(layoutInfo);
+        utils::vkEnsure(result);
+        return std::move(descriptorSetLayout);
+    }
     // Submit the recorded vk::CommandBuffer and wait once dtor is called.
     class SingleTimeCommandBuffer {
     public:
@@ -443,4 +454,4 @@ namespace utils {
     #ifndef SHOW_TYPE
         #define SHOW_TYPE(obj)      utils::TypeDisplayer<decltype(obj)> LOOK_ME;
     #endif
-#endif //VKLEARN_UTILS_HPP
+#endif //VKLEARN_UTILS_CPP
