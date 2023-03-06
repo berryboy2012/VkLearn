@@ -35,6 +35,10 @@ std::vector<vk::UniqueImageView> createImageViews(
 #include "graphics_pipeline.hpp"
 #include "descriptors.hpp"
 #include "renderpass.hpp"
+#define VMA_STATIC_VULKAN_FUNCTIONS 0
+#define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.hpp"
 void queryOVR(){
     vr::EVRInitError eError = vr::VRInitError_None;
     auto m_pHMD = vr::VR_Init( &eError, vr::VRApplication_Utility );
