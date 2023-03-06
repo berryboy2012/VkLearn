@@ -20,7 +20,7 @@ include(cmake/AddGLSLShader.cmake)
 include(cmake/AddTexture.cmake)
 find_package(OpenVR REQUIRED)
 
-add_executable(VkLearn main.cpp utils.hpp renderer.hpp model_data.hpp shader_modules.hpp)
+add_executable(VkLearn main.cpp utils.hpp renderer.hpp model_data.hpp shader_modules.hpp graphics_pipeline.hpp renderpass.hpp descriptors.hpp)
 target_include_directories(VkLearn PRIVATE ${Stb_INCLUDE_DIR})
 target_include_directories(VkLearn PRIVATE ${SPIRV-Cross_SOURCE_DIR})
 

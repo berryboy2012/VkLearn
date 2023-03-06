@@ -35,7 +35,6 @@ std::vector<vk::UniqueImageView> createImageViews(
 #include "rt_renderer.hpp"
 #include "graphics_pipeline.hpp"
 #include "descriptors.hpp"
-#include "attachments.hpp"
 #include "renderpass.hpp"
 void queryOVR(){
     vr::EVRInitError eError = vr::VRInitError_None;
