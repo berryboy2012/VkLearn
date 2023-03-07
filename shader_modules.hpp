@@ -4,8 +4,13 @@
 
 #ifndef VKLEARN_SHADER_MODULES_HPP
 #define VKLEARN_SHADER_MODULES_HPP
+#ifndef VULKAN_HPP_NO_EXCEPTIONS
+#define VULKAN_HPP_NO_EXCEPTIONS
+#endif
+#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
+#define VULKAN_HPP_ASSERT_ON_RESULT
 #include "vulkan/vulkan.hpp"
-#include "utils.hpp"
+#include "utils.h"
 // Push constants seems to be slower than UBO
 struct ScenePushConstants {
     glm::mat4 view;
@@ -76,13 +81,13 @@ public:
                 inColorInfo.binding = bindTableInfo.binding;
                 inColorInfo.location = 1;
                 inColorInfo.format = utils::glmTypeToFormat<glm::vec3>();
-                inColorInfo.offset = inPositionInfo.offset + static_cast<uint32_t>(utils::sizeofVkFormat.at(inPositionInfo.format));
+                inColorInfo.offset = inPositionInfo.offset + static_cast<uint32_t>(utils::getSizeofVkFormat(inPositionInfo.format));
 
                 vk::VertexInputAttributeDescription inTexCoordInfo{};
                 inTexCoordInfo.binding = bindTableInfo.binding;
                 inTexCoordInfo.location = 2;
                 inTexCoordInfo.format = utils::glmTypeToFormat<glm::vec2>();
-                inTexCoordInfo.offset = inColorInfo.offset + static_cast<uint32_t>(utils::sizeofVkFormat.at(inColorInfo.format));
+                inTexCoordInfo.offset = inColorInfo.offset + static_cast<uint32_t>(utils::getSizeofVkFormat(inColorInfo.format));
                 attrInfos_.push_back(inPositionInfo);
                 attrInfos_.push_back(inColorInfo);
                 attrInfos_.push_back(inTexCoordInfo);

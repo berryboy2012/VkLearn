@@ -15,7 +15,7 @@
 #include <optional>
 #include "glm/glm.hpp"
 #include "spirv_glsl.hpp"
-
+#include "utils.h"
 namespace utils {
     const std::unordered_map<spirv_cross::SPIRType::BaseType, const std::string> spirvTypeNameMap = {
             {spirv_cross::SPIRType::BaseType::Unknown, "Unknown"},
@@ -74,12 +74,7 @@ namespace utils {
         vk::Framebuffer framebuffer;
         vk::DescriptorSet descriptor_set;
     };
-    // Useful for storing a series of vk::Image handles along with their infos
-    struct VkImagesPack{
-        std::vector<vk::Image> images;
-        vk::Format format;
-        vk::Extent2D extent;
-    };
+
     // Yanked from https://github.com/KhronosGroup/Vulkan-Hpp/samples/utils/utils.cpp
     VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback( VkDebugUtilsMessageSeverityFlagBitsEXT       messageSeverity,
                                                                 VkDebugUtilsMessageTypeFlagsEXT              messageTypes,
@@ -175,7 +170,7 @@ namespace utils {
         requires std::is_same_v<decltype(T::pNext), void*>;
     };
 
-    inline void vkEnsure(const vk::Result &result, const std::optional<std::string> &prompt = std::nullopt){
+    inline void vkEnsure(const vk::Result &result, const std::optional<std::string> &prompt){
         if (result != vk::Result::eSuccess){
             if (prompt.has_value()){
                 std::cerr<<prompt.value()<<std::endl;
@@ -211,35 +206,16 @@ namespace utils {
         }
     }
 
-    template <typename T>
-    concept isGlmType = requires (){
-        typename T::value_type;
-        // Just introduce glm namespace, will not use it.
-        {T::length()} -> std::same_as<glm::length_t>;
-    };
-
-    template <typename T>
-    requires isGlmType<T>
-    consteval vk::Format glmTypeToFormat(){
-        if (std::is_same_v<typename T::value_type, float>){
-            const auto totalSize = sizeof(T)/sizeof(typename T::value_type);
-            switch (totalSize) {
-                case 1: return vk::Format::eR32Sfloat;
-                case 2: return vk::Format::eR32G32Sfloat;
-                case 3: return vk::Format::eR32G32B32Sfloat;
-                case 4: return vk::Format::eR32G32B32A32Sfloat;
-                default:
-                    static_assert(totalSize<5 && totalSize > 0);;//MSVC is acting a bit funny here, don't remove the empty expression
-            }
-        }
-    }
-
     const std::unordered_map<vk::Format, size_t> sizeofVkFormat = {
         {vk::Format::eR32Sfloat, 4},
         {vk::Format::eR32G32Sfloat, 8},
         {vk::Format::eR32G32B32Sfloat, 12},
         {vk::Format::eR32G32B32A32Sfloat, 16}
     };
+
+    size_t getSizeofVkFormat(vk::Format format){
+        return sizeofVkFormat.at(format);
+    }
 
     // TODO: add probing support for SSBO
     vk::UniqueShaderModule createShaderModule(const std::string &filePath, vk::Device &device) {
@@ -367,32 +343,43 @@ namespace utils {
         return std::move(descriptorSetLayout);
     }
     // Submit the recorded vk::CommandBuffer and wait once dtor is called.
-    class SingleTimeCommandBuffer {
-    public:
-        vk::CommandBuffer coBuf{};
-        SingleTimeCommandBuffer(const SingleTimeCommandBuffer &) = delete;
-        SingleTimeCommandBuffer& operator= (const SingleTimeCommandBuffer &) = delete;
-        SingleTimeCommandBuffer(vk::CommandPool &commandPool, vk::Queue &queue, vk::Device &device):
-                commandPool_(commandPool),
+    SingleTimeCommandBuffer::SingleTimeCommandBuffer(SingleTimeCommandBuffer &&other) noexcept {
+        *this = std::move(other);
+    }
+
+    SingleTimeCommandBuffer& SingleTimeCommandBuffer::operator= (SingleTimeCommandBuffer &&other) noexcept {
+            if (this != &other){
+                coBuf = other.coBuf;
+                other.coBuf = VK_NULL_HANDLE;
+                isCmdBufRetired_ = other.isCmdBufRetired_;
+                other.isCmdBufRetired_ = true;
+                device_ = other.device_;
+                queue_ = other.queue_;
+            }
+            return *this;
+    }
+
+    SingleTimeCommandBuffer::SingleTimeCommandBuffer(vk::CommandPool &commandPool, vk::Queue &queue, vk::Device &device):
                 queue_(queue),
                 device_(device)
-        {
+    {
             vk::CommandBufferAllocateInfo allocInfo{};
             allocInfo.level = vk::CommandBufferLevel::ePrimary;
             allocInfo.commandPool = commandPool;
             allocInfo.commandBufferCount = 1;
             {
-                vk::Result result{};
-                std::tie(result, commBuffs_) = device.allocateCommandBuffers(allocInfo);
+                auto [result, buf] = device.allocateCommandBuffers(allocInfo);
                 vkEnsure(result);
+                coBuf = buf[0];
+                isCmdBufRetired_ = false;
             }
-            coBuf = commBuffs_[0];
             vk::CommandBufferBeginInfo beginInfo{};
             beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
             auto result = coBuf.begin(beginInfo);
             vkEnsure(result);
-        }
-        ~SingleTimeCommandBuffer(){
+    }
+    SingleTimeCommandBuffer::~SingleTimeCommandBuffer(){
+        if (!isCmdBufRetired_){
             auto result = coBuf.end();
             vkEnsure(result);
             vk::SubmitInfo submitInfo{};
@@ -402,56 +389,51 @@ namespace utils {
             vkEnsure(subResult);
             auto waitResult = queue_.waitIdle();
             vkEnsure(waitResult);
-            device_.freeCommandBuffers(commandPool_, commBuffs_);
         }
-    private:
-        std::vector<vk::CommandBuffer> commBuffs_{};
-        vk::Device device_{};
-        vk::CommandPool commandPool_{};
-        vk::Queue queue_{};
-    };
-    template<typename T>
-    inline glm::mat<4, 4, T> vkuLookAtRH(glm::vec<3, T> const& eye, glm::vec<3, T> const& center, glm::vec<3, T> const& up)
-    {
-        glm::vec<3, T> const f(normalize(center - eye));
-        glm::vec<3, T> const s(normalize(cross(f, up)));
-        glm::vec<3, T> const u(cross(f, s));
-
-        glm::mat<4, 4, T> Result(1);
-        Result[0][0] = s.x;
-        Result[1][0] = s.y;
-        Result[2][0] = s.z;
-        Result[0][1] = u.x;
-        Result[1][1] = u.y;
-        Result[2][1] = u.z;
-        Result[0][2] = f.x;
-        Result[1][2] = f.y;
-        Result[2][2] = f.z;
-        Result[3][0] =-dot(s, eye);
-        Result[3][1] =-dot(u, eye);
-        Result[3][2] =-dot(f, eye);
-        return Result;
     }
-    template<typename T>
-    inline glm::mat<4, 4, T> vkuPerspectiveRHReverse_ZO(T fovy, T aspect, T zNear, T zFar)
-    {
-        assert(abs(aspect - std::numeric_limits<T>::epsilon()) > static_cast<T>(0));
 
-        T const tanHalfFovy = tan(fovy / static_cast<T>(2));
+    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+                               vk::Device &device,
+                               vk::CommandPool &commandPool,
+                               vk::Queue &graphicsQueue) {
 
-        glm::mat<4, 4, T> Result(static_cast<T>(0));
-        Result[0][0] = static_cast<T>(1) / (aspect * tanHalfFovy);
-        Result[1][1] = static_cast<T>(1) / (tanHalfFovy);
-        Result[2][2] = zNear / (zNear - zFar);
-        Result[2][3] = static_cast<T>(1);
-        Result[3][2] = (zFar * zNear) / (zFar - zNear);
-        return Result;
+        vk::ImageMemoryBarrier barrier{};
+        barrier.oldLayout = oldLayout;
+        barrier.newLayout = newLayout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image;
+        barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+
+        vk::PipelineStageFlags sourceStage;
+        vk::PipelineStageFlags destinationStage;
+
+        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+            barrier.srcAccessMask = {};
+            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+            destinationStage = vk::PipelineStageFlagBits::eTransfer;
+        } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+            sourceStage = vk::PipelineStageFlagBits::eTransfer;
+            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+        } else {
+            std::abort();
+        }
+
+        {
+            utils::SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
+            singleTime.coBuf.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+
     }
-    // A trick to manually display type names upon compilation
-    template<typename T>
-    class TypeDisplayer;
+
 }
-    #ifndef SHOW_TYPE
-        #define SHOW_TYPE(obj)      utils::TypeDisplayer<decltype(obj)> LOOK_ME;
-    #endif
 #endif //VKLEARN_UTILS_CPP

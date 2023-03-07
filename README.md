@@ -38,10 +38,10 @@ The rest are trivial stuffs.
 - Can load geometries into the GPU and build accelerated structures (AS, usually some form of BVH tree) from them.
 
 ## TODO:
-- ~~Vertex staging buffer. (Transfer data from/to GPU's local memory)~~
-- ~~Index buffer. (Tell GPU a correlate vertices with triangles)~~
+- ~~Vertex staging resource. (Transfer data from/to GPU's local memory)~~
+- ~~Index resource. (Tell GPU a correlate vertices with triangles)~~
 - ~~Push constants and uniform buffers for MVP matrices. (Send arbitrary structured values into shader)~~
-- ~~Descriptor layout and related stuff. (Create generic buffer on GPU)~~
+- ~~Descriptor layout and related stuff. (Create generic resource on GPU)~~
 - ~~Handle differences in coordinate system between Vulkan and OpenGL, so we can use `glm` without 
  scratching head.~~
 - ~~Image, image view and sampler. (Use textures in fragment shader)~~
@@ -83,7 +83,7 @@ For resources, Vulkan is pretty hardcore:
 - Heap: The whole usable memory space.
   - Memory: A continuous block of raw memory. Only a small number of memory entries can be allocated.
     - Buffer: A handle representing a chunk of a memory.
-    - Image: buffer but with additional format info.
+    - Image: Buffer but with additional format info.
   - Sparse resources: Vulkan's take on virtual memory.
 
 For synchronization, Vulkan gives fine-grained concepts for maximum parallelism. The details can be found at
@@ -96,12 +96,15 @@ A rough summary would be as follows (The spec does a pretty poor job at setting 
 - There is no guarantee about the execution order of the commands being sent to devices, provided if you don't use 
  Vulkan's synchronization facilities.
 - If synchronization facilities are used, their scopes are built upon the submission order, so you don't need to be 
- insanely verbose when specifying the execution order of your commands. For example, when setting a semaphore, 
- you don't need to worry about the semaphore being applied to commands that were already submitted. 
+ insanely verbose when specifying the execution order of your commands. For example, you don't need to keep track of 
+ indices of previous commands when setting a semaphore. 
 
 Please note that the summary above is not meant to be accurate, but a mental model to aid understanding when reading the spec.
 
 The facilities to interact between host and device are built around command buffers and queries.
+Each thread should have its own `vk::Queue` for command submission. Also, it is generally a good practice for each 
+thread to allocate one `vk::CommandPool` per in-flight frame. By doing so, we can just reset the pool when starting a 
+new frame.
 
 ## Useful resources:
 - [Vulkan Tutorial](https://vulkan-tutorial.com), the OG vulkan guide.

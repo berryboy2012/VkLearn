@@ -25,7 +25,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #ifdef max
     #undef max
 #endif
-#include "utils.hpp"
+#include "utils.h"
 std::vector<vk::UniqueImageView> createImageViews(
         const std::span<vk::Image>& images,
         const vk::Format &format, const vk::ImageAspectFlags &imageAspect,
@@ -35,10 +35,8 @@ std::vector<vk::UniqueImageView> createImageViews(
 #include "graphics_pipeline.hpp"
 #include "descriptors.hpp"
 #include "renderpass.hpp"
-#define VMA_STATIC_VULKAN_FUNCTIONS 0
-#define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
-#define VMA_IMPLEMENTATION
-#include "vk_mem_alloc.hpp"
+#include "commands.hpp"
+#include "memory_management.hpp"
 void queryOVR(){
     vr::EVRInitError eError = vr::VRInitError_None;
     auto m_pHMD = vr::VR_Init( &eError, vr::VRApplication_Utility );

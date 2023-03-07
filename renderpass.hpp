@@ -114,9 +114,9 @@ public:
     vk::RenderPass createRenderpass(){
         // Renderpass -- span<attachment>
         //        \\____ span<subpass>
-        //         \                \____ several span<ref to attachment>
-        //          \____ span<dependency>
-        //                              \____ ref to subpass
+        //         \                \____ several span<ref to attachment>: AttachIdx to index in span<attachment>
+        //          \____ span<dependency>: SubpassIdx to index in span<subpass>
+        //                              \____ ref to subpass: SubpassIdx to index in span<subpass>
         std::vector<vk::AttachmentDescription2> attaches{};
         std::map<AttachIdx, size_t> attachLUT{};
         for (auto& desc: attachDescs_){

@@ -7,7 +7,7 @@
 class DescriptorManager{
 public:
     vk::DescriptorPool descriptorPool_{};
-
+    typedef size_t LayoutIdx;
     DescriptorManager(const DescriptorManager &) = delete;
     DescriptorManager& operator= (const DescriptorManager &) = delete;
     explicit DescriptorManager(vk::Device device){
@@ -29,8 +29,8 @@ public:
     // Vulkan does not provide a way to calculate the descriptor pool usage of a descriptor set layout, we have to go
     //  one step lower.
     // Each call should correspond to a single descriptor set layout.
-    // The returned size_t object is used to unregister the bindings later.
-    size_t registerDescriptorBindings(const std::span<const vk::DescriptorSetLayoutBinding> bindings){
+    // The returned LayoutIdx object is used to unregister the bindings later.
+    LayoutIdx registerDescriptorBindings(const std::span<const vk::DescriptorSetLayoutBinding> bindings){
         std::vector<vk::DescriptorPoolSize> layoutSize{};
         for (auto & bind: bindings){
             vk::DescriptorPoolSize bindSize = {};
@@ -38,13 +38,13 @@ public:
             bindSize.descriptorCount = bind.descriptorCount;
             layoutSize.push_back(bindSize);
         }
-        size_t index = layoutSizes_.empty() ? 0 : layoutSizes_.rbegin()->first+1;
+        LayoutIdx index = layoutSizes_.empty() ? 0 : layoutSizes_.rbegin()->first+1;
         layoutSizes_[index] = layoutSize;
         numDescLayouts_ += 1;
         return index;
     }
     // Supply the object returned by registerDescriptorBindings() here.
-    void unregisterDescriptorBindings(const size_t layoutIndex){
+    void unregisterDescriptorBindings(const LayoutIdx layoutIndex){
         if (layoutSizes_.contains(layoutIndex)){
             layoutSizes_.erase(layoutIndex);
             numDescLayouts_ -= 1;
@@ -121,7 +121,7 @@ public:
     }
 private:
     vk::Device device_{};
-    std::map<size_t, std::vector<vk::DescriptorPoolSize>> layoutSizes_{};
+    std::map<LayoutIdx, std::vector<vk::DescriptorPoolSize>> layoutSizes_{};
     size_t numDescLayouts_{};
     vk::UniqueDescriptorPool pool_{};
 };
