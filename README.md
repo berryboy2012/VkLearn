@@ -88,6 +88,19 @@ For resources, Vulkan is pretty hardcore:
 
 For synchronization, Vulkan gives fine-grained concepts for maximum parallelism. The details can be found at
 [the synchronization part of Vulkan specs](https://registry.khronos.org/vulkan/specs/1.3/html/vkspec.html#synchronization).
+
+A rough summary would be as follows (The spec does a pretty poor job at setting up expectations right at first glance):
+- The stages inside a subpass are mostly in order, so you don't need to specify the ordering between vertex shader and 
+ fragment shader inside a pipeline. But no guarantees about ordering between stages of different subpasses. Those can be
+ specified by subpass dependencies. There might be other implicit execution ordering rules in the spec.
+- There is no guarantee about the execution order of the commands being sent to devices, provided if you don't use 
+ Vulkan's synchronization facilities.
+- If synchronization facilities are used, their scopes are built upon the submission order, so you don't need to be 
+ insanely verbose when specifying the execution order of your commands. For example, when setting a semaphore, 
+ you don't need to worry about the semaphore being applied to commands that were already submitted. 
+
+Please note that the summary above is not meant to be accurate, but a mental model to aid understanding when reading the spec.
+
 The facilities to interact between host and device are built around command buffers and queries.
 
 ## Useful resources:
