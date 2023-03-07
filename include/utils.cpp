@@ -16,6 +16,8 @@
 #include "glm/glm.hpp"
 #include "spirv_glsl.hpp"
 #include "utils.h"
+#include "commands_management.h"
+
 namespace utils {
     const std::unordered_map<spirv_cross::SPIRType::BaseType, const std::string> spirvTypeNameMap = {
             {spirv_cross::SPIRType::BaseType::Unknown, "Unknown"},
@@ -341,98 +343,6 @@ namespace utils {
         auto [result, descriptorSetLayout] = device.createDescriptorSetLayoutUnique(layoutInfo);
         utils::vkEnsure(result);
         return std::move(descriptorSetLayout);
-    }
-    // Submit the recorded vk::CommandBuffer and wait once dtor is called.
-    SingleTimeCommandBuffer::SingleTimeCommandBuffer(SingleTimeCommandBuffer &&other) noexcept {
-        *this = std::move(other);
-    }
-
-    SingleTimeCommandBuffer& SingleTimeCommandBuffer::operator= (SingleTimeCommandBuffer &&other) noexcept {
-            if (this != &other){
-                coBuf = other.coBuf;
-                other.coBuf = VK_NULL_HANDLE;
-                isCmdBufRetired_ = other.isCmdBufRetired_;
-                other.isCmdBufRetired_ = true;
-                device_ = other.device_;
-                queue_ = other.queue_;
-            }
-            return *this;
-    }
-
-    SingleTimeCommandBuffer::SingleTimeCommandBuffer(vk::CommandPool &commandPool, vk::Queue &queue, vk::Device &device):
-                queue_(queue),
-                device_(device)
-    {
-            vk::CommandBufferAllocateInfo allocInfo{};
-            allocInfo.level = vk::CommandBufferLevel::ePrimary;
-            allocInfo.commandPool = commandPool;
-            allocInfo.commandBufferCount = 1;
-            {
-                auto [result, buf] = device.allocateCommandBuffers(allocInfo);
-                vkEnsure(result);
-                coBuf = buf[0];
-                isCmdBufRetired_ = false;
-            }
-            vk::CommandBufferBeginInfo beginInfo{};
-            beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-            auto result = coBuf.begin(beginInfo);
-            vkEnsure(result);
-    }
-    SingleTimeCommandBuffer::~SingleTimeCommandBuffer(){
-        if (!isCmdBufRetired_){
-            auto result = coBuf.end();
-            vkEnsure(result);
-            vk::SubmitInfo submitInfo{};
-            submitInfo.commandBufferCount = 1;
-            submitInfo.pCommandBuffers = &coBuf;
-            auto subResult = queue_.submit(submitInfo);
-            vkEnsure(subResult);
-            auto waitResult = queue_.waitIdle();
-            vkEnsure(waitResult);
-        }
-    }
-
-    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
-                               vk::Device &device,
-                               vk::CommandPool &commandPool,
-                               vk::Queue &graphicsQueue) {
-
-        vk::ImageMemoryBarrier barrier{};
-        barrier.oldLayout = oldLayout;
-        barrier.newLayout = newLayout;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = image;
-        barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-
-        vk::PipelineStageFlags sourceStage;
-        vk::PipelineStageFlags destinationStage;
-
-        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
-            barrier.srcAccessMask = {};
-            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-
-            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
-            destinationStage = vk::PipelineStageFlagBits::eTransfer;
-        } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
-            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-
-            sourceStage = vk::PipelineStageFlagBits::eTransfer;
-            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
-        } else {
-            std::abort();
-        }
-
-        {
-            utils::SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
-            singleTime.coBuf.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
-        }
-
     }
 
 }

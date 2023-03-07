@@ -35,7 +35,7 @@ std::vector<vk::UniqueImageView> createImageViews(
 #include "graphics_pipeline.hpp"
 #include "descriptors.hpp"
 #include "renderpass.hpp"
-#include "commands.hpp"
+#include "commands_management.h"
 #include "memory_management.hpp"
 void queryOVR(){
     vr::EVRInitError eError = vr::VRInitError_None;
@@ -86,7 +86,7 @@ std::vector<std::string> getRequiredValidationLayers(bool enableValidationLayers
                 }
             }
             if (!layerFound){
-                abort();
+                std::abort();
             }
         }
     }

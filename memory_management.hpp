@@ -4,6 +4,20 @@
 
 #ifndef VKLEARN_MEMORY_MANAGEMENT_HPP
 #define VKLEARN_MEMORY_MANAGEMENT_HPP
+
+#include <concepts>
+#include "vulkan/vulkan.hpp"
+#include "commands_management.h"
+#include "spirv_glsl.hpp"
+#include "glm/glm.hpp"
+#include <optional>
+#include <map>
+#include <format>
+#include <fstream>
+#include <any>
+#include <functional>
+#include <iostream>
+
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
 #define VMA_IMPLEMENTATION
@@ -167,6 +181,27 @@ public:
         copyBuffer(stagingBuffer.resource.get(), finalBuffer.resource.get(), bufferSize, resCmdPool_);
         return std::move(finalBuffer);
     }
+    // Deprecated
+    static void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+                                      vk::Device &device,
+                                      vk::CommandPool &commandPool,
+                                      vk::Queue &graphicsQueue){
+        auto [barrier, sourceStage, destinationStage] = imgTransInfoBuilder(image, format, oldLayout, newLayout);
+
+        {
+            SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
+            singleTime.coBuf.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+    }
+
+    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout){
+        auto [barrier, sourceStage, destinationStage] = imgTransInfoBuilder(image, format, oldLayout, newLayout);
+
+        {
+            auto singleTime = resCmdPool_.getSingleTimeCommandBuffer();
+            singleTime.coBuf.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+    }
 
     template<class HostElementType>
     VulkanResourceMemory<vk::Image> createImagenMemoryFromHostData(
@@ -183,12 +218,51 @@ public:
                 VmaFlagE::eHostAccessSequentialWrite|VmaFlagE::eMapped);
         std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
         auto finalImage = createImagenMemory(extent, format, tiling, layout, imageUsage|ImgUsage::eTransferDst, vmaFlag, memProps, vmaMemUsage);
-        //utils::transitionImageLayout(finalImage.resource.get(), format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, device_, resCmdPool_)
+        transitionImageLayout(finalImage.resource.get(), format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
         copyImageFromBuffer(stagingBuffer.resource.get(), finalImage.resource.get(), bufferSize, resCmdPool_);
+        transitionImageLayout(finalImage.resource.get(), format,
+                              vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
         return std::move(finalImage);
     }
 
 private:
+    static std::tuple<
+            vk::ImageMemoryBarrier,
+            vk::PipelineStageFlags,
+            vk::PipelineStageFlags> imgTransInfoBuilder(
+                    vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout){
+        vk::ImageMemoryBarrier barrier{};
+        barrier.oldLayout = oldLayout;
+        barrier.newLayout = newLayout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image;
+        barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+
+        vk::PipelineStageFlags sourceStage;
+        vk::PipelineStageFlags destinationStage;
+
+        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+            barrier.srcAccessMask = {};
+            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+            destinationStage = vk::PipelineStageFlagBits::eTransfer;
+        } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+            sourceStage = vk::PipelineStageFlagBits::eTransfer;
+            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+        } else {
+            std::abort();
+        }
+        return std::make_tuple(barrier, sourceStage, destinationStage);
+    }
     vk::Instance inst_{};
     vk::PhysicalDevice physDev_{};
     vk::Device device_{};

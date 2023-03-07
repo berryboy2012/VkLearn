@@ -18,6 +18,8 @@
 #include <stb_image.h>
 #include "model_data.hpp"
 #include "shader_modules.hpp"
+#include "commands_management.h"
+#include "memory_management.hpp"
 
 /*Coordinate system differences between Vulkan and OpenGL (https://vincent-p.github.io/posts/vulkan_perspective_matrix/)
  *
@@ -328,7 +330,7 @@ void copyBuffer(vk::Buffer &srcBuffer, vk::Buffer &dstBuffer, const vk::DeviceSi
     copyRegion.size = size;
     copyRegions.push_back(copyRegion);
     {
-        utils::SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
+        SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
         // This has a ver. 2 variant
         singleTime.coBuf.copyBuffer(srcBuffer, dstBuffer, copyRegions.size(), copyRegions.data());
     }
@@ -349,7 +351,7 @@ void copyImageFromBuffer(vk::Buffer &srcBuffer, vk::Image &dstImage, const vk::E
     copyRegion.imageExtent = extent;
     copyRegions.push_back(copyRegion);
     {
-        utils::SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
+        SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
         // This has a ver. 2 variant
         singleTime.coBuf.copyBufferToImage(srcBuffer, dstImage, vk::ImageLayout::eTransferDstOptimal, copyRegions);
     }
@@ -428,11 +430,11 @@ std::tuple<vk::UniqueImage, vk::UniqueDeviceMemory> createImagenMemoryFromHostDa
             queueFamilyIdx,
             device,
             physicalDevice);
-    utils::transitionImageLayout(image.get(), format,
+    VulkanResourceManager::transitionImageLayout(image.get(), format,
                           vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
                           device, commandPool, graphicsQueue);
     copyImageFromBuffer(stageBuffer.get(), image.get(), extent, commandPool, device, graphicsQueue);
-    utils::transitionImageLayout(image.get(), format,
+    VulkanResourceManager::transitionImageLayout(image.get(), format,
                           vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
                           device, commandPool, graphicsQueue);
     return std::make_tuple(std::move(image), std::move(imageMemory));

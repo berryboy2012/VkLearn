@@ -6,6 +6,7 @@
 #define VKLEARN_RT_RENDERER_HPP
 
 #include "model_data.hpp"
+#include "commands_management.h"
 #include <ranges>
 #include <vector>
 #include <span>
@@ -310,13 +311,13 @@ namespace rt_render {
             std::span<decltype(m_blas)::value_type> blasChunk(m_blas.begin() + blasChunkBegin,
                                                               m_blas.begin() + blasChunkEnd);
             {
-                utils::SingleTimeCommandBuffer tmpCmdBuf{cmdPool, queue, device};
+                SingleTimeCommandBuffer tmpCmdBuf{cmdPool, queue, device};
                 cmdCreateBlasBatch(tmpCmdBuf.coBuf, blasInfoChunk, blasChunk, scratchAddress,
                                    queryPool.get(), device, queueFamilyIdx, physicalDevice);
             }
             if (doCompaction) {
                 std::vector<AccelStructObj> oldAs{};
-                utils::SingleTimeCommandBuffer tmpCmdBuf{cmdPool, queue, device};
+                SingleTimeCommandBuffer tmpCmdBuf{cmdPool, queue, device};
                 oldAs = cmdCompactBlasBatch(tmpCmdBuf.coBuf, blasInfoChunk, blasChunk,
                                             queryPool.get(), device, queueFamilyIdx, physicalDevice);
             }
@@ -523,7 +524,7 @@ namespace rt_render {
             vk::MemoryBarrier barrier{};
             barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
             barrier.dstAccessMask = vk::AccessFlagBits::eAccelerationStructureWriteKHR;
-            utils::SingleTimeCommandBuffer singleCBuf{cmdPool, queue, device};
+            SingleTimeCommandBuffer singleCBuf{cmdPool, queue, device};
             // Make sure the copy of the instance buffer are copied before triggering the acceleration structure build
             singleCBuf.coBuf.pipelineBarrier(
                     vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR,

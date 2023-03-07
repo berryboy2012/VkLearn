@@ -60,25 +60,7 @@ namespace utils {
     size_t getSizeofVkFormat(vk::Format format);
     vk::UniqueShaderModule createShaderModule(const std::string &filePath, vk::Device &device);
     vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device);
-    class SingleTimeCommandBuffer {
-    public:
-        vk::CommandBuffer coBuf{};
-        SingleTimeCommandBuffer() = default;
-        SingleTimeCommandBuffer(const SingleTimeCommandBuffer &) = delete;
-        SingleTimeCommandBuffer& operator= (const SingleTimeCommandBuffer &) = delete;
-        SingleTimeCommandBuffer(SingleTimeCommandBuffer &&other) noexcept ;
-        SingleTimeCommandBuffer& operator= (SingleTimeCommandBuffer &&other) noexcept ;
-        SingleTimeCommandBuffer(vk::CommandPool &commandPool, vk::Queue &queue, vk::Device &device);
-        ~SingleTimeCommandBuffer();
-    private:
-        bool isCmdBufRetired_ = true;
-        vk::Device device_;
-        vk::Queue queue_;
-    };
-    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
-                               vk::Device &device,
-                               vk::CommandPool &commandPool,
-                               vk::Queue &graphicsQueue);
+
     template<typename T>
     inline glm::mat<4, 4, T> vkuLookAtRH(glm::vec<3, T> const& eye, glm::vec<3, T> const& center, glm::vec<3, T> const& up)
     {
