@@ -11,6 +11,7 @@
 #include <fstream>
 #include <format>
 #include <map>
+#include <ranges>
 #include <optional>
 #include "spirv_glsl.hpp"
 #ifndef VULKAN_HPP_NO_EXCEPTIONS
@@ -98,9 +99,19 @@ namespace utils {
         Result[3][2] = (zFar * zNear) / (zFar - zNear);
         return Result;
     }
+    template <typename Enum>
+    constexpr inline auto enum_range = [](auto front, auto back) {
+        return std::views::iota(static_cast<std::underlying_type_t<Enum>>(front), static_cast<std::underlying_type_t<Enum>>(back) + 1)
+               | std::views::transform([](auto e) { return Enum(e); });
+    };
     // A trick to manually display type names upon compilation
     template<typename T>
     class TypeDisplayer;
+
+    struct QueueStruct{
+        vk::Queue queue{};
+        uint32_t queueFamilyIdx{};
+    };
 }
 #ifndef SHOW_TYPE
 #define SHOW_TYPE(obj)      utils::TypeDisplayer<decltype(obj)> LOOK_ME;

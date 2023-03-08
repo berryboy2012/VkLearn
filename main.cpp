@@ -30,13 +30,13 @@ std::vector<vk::UniqueImageView> createImageViews(
         const std::span<vk::Image>& images,
         const vk::Format &format, const vk::ImageAspectFlags &imageAspect,
         vk::Device &device);
-#include "renderer.hpp"
-#include "rt_renderer.hpp"
 #include "graphics_pipeline.hpp"
-#include "descriptors.hpp"
+#include "bindings_management.hpp"
 #include "renderpass.hpp"
 #include "commands_management.h"
 #include "memory_management.hpp"
+#include "renderer.hpp"
+#include "rt_renderer.hpp"
 void queryOVR(){
     vr::EVRInitError eError = vr::VRInitError_None;
     auto m_pHMD = vr::VR_Init( &eError, vr::VRApplication_Utility );
@@ -648,7 +648,7 @@ int main(int argc, char *argv[]) {
             {imagesPackSDL.extent.width, imagesPackSDL.extent.height, 1}, graphQueueIdx, vkUniqueDevice.get(), chosenPhysicalDevice);
     auto renderPassSDL = createRenderPassSDL(imagesPackSDL.format, depthFormat, vkUniqueDevice.get());
     auto framebuffersSDL = createFramebuffers(imageViewsSDL, depthImageView.get(), imagesPackSDL.extent, renderPassSDL.get(), vkUniqueDevice.get());
-    setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), vkQueues[0]);
+    setupRender(vkUniqueInstance.get(), chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), vkQueues[0]);
     //Now for the main loop
     SDL_StartTextInput();
     size_t frames = 0;
@@ -781,7 +781,7 @@ int main(int argc, char *argv[]) {
             //renderPassSDL = createRenderPassSDL(imagesPackSDL.format, vkUniqueDevice.get());
             framebuffersSDL = createFramebuffers(imageViewsSDL, depthImageView.get(), imagesPackSDL.extent, renderPassSDL.get(), vkUniqueDevice.get());
             // Re-initialize renderer
-            setupRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), vkQueues[0]);
+            setupRender(vkUniqueInstance.get(), chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), vkQueues[0]);
             frames = 0;
             resetSwapchain = false;
         }

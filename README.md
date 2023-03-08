@@ -28,6 +28,14 @@ The rest are trivial stuffs.
 - Right-hand coordinate convention with vanilla Vulkan screen space coordinate rules.
 - Aggressive use of vendor-agnostic Vulkan features and extensions.
 
+### Hierarchy of project:
+
+- `renderpass.hpp`: The standalone part of rendering execution.
+- `memory_management.hpp`: The standalone part of resource management during rendering.
+- `bindings_management.hpp`: The mapping between execution's requirements and data on the machine in terms of resources.
+- __TODO__ `timeline_management.hpp`
+
+
 ## Current state:
 - Uses some features in Vulkan1.3 to make life a bit easier.
 - Can display a hard-coded textured mesh with Model-View-Projection matrices in effect.

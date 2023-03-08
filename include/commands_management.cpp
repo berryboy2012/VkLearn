@@ -85,7 +85,7 @@ CommandBufferManager& CommandBufferManager::operator= (CommandBufferManager &&ot
     }
     return *this;
 }
-CommandBufferManager::CommandBufferManager(vk::Device device, QueueStruct queueCGTP){
+CommandBufferManager::CommandBufferManager(vk::Device device, utils::QueueStruct queueCGTP){
     // We assume the provided queue can be used for all types of commands.
     //  Including Compute-Graphics-Transfer-Presentation.
     device_ = device;

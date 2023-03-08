@@ -195,11 +195,15 @@ createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::Ren
     vk::UniqueDescriptorSetLayout descLayout{};
     {
         std::vector<vk::DescriptorSetLayoutBinding> bindings{};
-        for (auto &bind: vertShader.descLayouts_) {
-            bindings.push_back(bind);
+        for (auto &bindSet: vertShader.descLayouts_) {
+            for (auto &bind: bindSet.second){
+                bindings.push_back(bind);
+            }
         }
-        for (auto &bind: fragShader.descLayouts_) {
-            bindings.push_back(bind);
+        for (auto &bindSet: fragShader.descLayouts_) {
+            for (auto &bind: bindSet.second){
+                bindings.push_back(bind);
+            }
         }
         descLayout = utils::createDescriptorSetLayout(bindings, device);
     }
@@ -728,6 +732,7 @@ void createSyncObjects(vk::Device &device) {
 }
 
 void setupRender(
+        vk::Instance instance,
         const vk::PhysicalDevice &physicalDevice,
         vk::Device &device,
         vk::Extent2D &viewportExtent,

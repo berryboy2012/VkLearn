@@ -21,10 +21,6 @@
 #define VULKAN_HPP_ASSERT_ON_RESULT
 #include "vulkan/vulkan.hpp"
 #include "utils.h"
-struct QueueStruct{
-    vk::Queue queue{};
-    uint32_t queueFamilyIdx{};
-};
 
 class SingleTimeCommandBuffer {
     // Submit the recorded vk::CommandBuffer and wait once dtor is called.
@@ -46,13 +42,13 @@ private:
 class CommandBufferManager{
     // A thin layer over vk::CommandPool and vk::Queue
 public:
-    typedef QueueStruct QueueStructType;
+    typedef utils::QueueStruct QueueStructType;
     CommandBufferManager() = default;
     CommandBufferManager(const CommandBufferManager &) = delete;
     CommandBufferManager& operator= (const CommandBufferManager &) = delete;
     CommandBufferManager(CommandBufferManager &&other) noexcept;
     CommandBufferManager& operator= (CommandBufferManager &&other) noexcept;
-    explicit CommandBufferManager(vk::Device device, QueueStruct queueCGTP);
+    explicit CommandBufferManager(vk::Device device, utils::QueueStruct queueCGTP);
     std::vector<vk::CommandBuffer> createCommandBuffers(size_t numBuffers);
     void submitCommandBuffers(std::span<const vk::SemaphoreSubmitInfo> semaphoresWait,
                               std::span<const vk::CommandBuffer> commandBuffers,

@@ -22,17 +22,89 @@
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.hpp"
-template<typename ResType>
-requires std::is_same_v<ResType, vk::Buffer> || std::is_same_v<ResType, vk::Image>
-struct VulkanResourceMemory{
-    vk::UniqueHandle<ResType,vma::Dispatcher> resource{};
+#include "utils.h"
+// The lifetime of vk::Buffer and vk::Image has some degree of freedom, we need to keep track of some information.
+struct VulkanBufferMemory{
     vk::UniqueHandle<vma::Allocation,vma::Dispatcher> mem{};
     vma::AllocationInfo auxInfo{};
+    vk::UniqueHandle<vk::Buffer,vma::Dispatcher> resource{};
+    vk::BufferCreateInfo resInfo{};
+    VulkanBufferMemory() = default;
+    VulkanBufferMemory(const VulkanBufferMemory &) = delete;
+    VulkanBufferMemory& operator= (const VulkanBufferMemory &) = delete;
+    VulkanBufferMemory(VulkanBufferMemory &&other) noexcept{
+        *this = std::move(other);
+    }
+    VulkanBufferMemory& operator= (VulkanBufferMemory &&other) noexcept {
+        if (this != &other){
+            mem = std::move(other.mem);
+            auxInfo = other.auxInfo;
+            resource = std::move(other.resource);
+            resInfo = other.resInfo;
+        }
+        return *this;
+    }
 };
+typedef VulkanBufferMemory VulkanPhantomBuffer;
+struct VulkanImageMemory{
+    vk::Device device_{};
+    vk::UniqueHandle<vma::Allocation,vma::Dispatcher> mem{};
+    vma::AllocationInfo auxInfo{};
+    vk::UniqueHandle<vk::Image,vma::Dispatcher> resource{};
+    vk::ImageCreateInfo resInfo{};
+    // vk::Image has the complication of vk::ImageView, vk::Sampler can live on its own.
+    vk::UniqueImageView view{};
+    VulkanImageMemory() = default;
+    VulkanImageMemory(const VulkanImageMemory &) = delete;
+    VulkanImageMemory& operator= (const VulkanImageMemory &) = delete;
+    VulkanImageMemory(VulkanImageMemory &&other) noexcept{
+        *this = std::move(other);
+    }
+    VulkanImageMemory& operator= (VulkanImageMemory &&other) noexcept {
+        if (this != &other){
+            mem = std::move(other.mem);
+            auxInfo = other.auxInfo;
+            resource = std::move(other.resource);
+            resInfo = other.resInfo;
+            view = std::move(other.view);
+        }
+        return *this;
+    }
+    void createView(const vk::ImageAspectFlags imageAspect){
+        vk::ImageViewCreateInfo createInfo = {};
+        createInfo.image = resource.get();
+        switch (resInfo.imageType) {
+            case vk::ImageType::e1D:
+                createInfo.viewType = vk::ImageViewType::e1D;
+                break;
+            case vk::ImageType::e2D:
+                createInfo.viewType = vk::ImageViewType::e2D;
+                break;
+            case vk::ImageType::e3D:
+                createInfo.viewType = vk::ImageViewType::e3D;
+                break;
+        }
+        createInfo.format = resInfo.format;
+        createInfo.components.r = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.g = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.b = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.a = vk::ComponentSwizzle::eIdentity;
+        createInfo.subresourceRange.aspectMask = imageAspect;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = resInfo.mipLevels;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = resInfo.arrayLayers;
+        auto [result, imgView] = device_.createImageViewUnique(createInfo);
+        utils::vkEnsure(result);
+        view = std::move(imgView);
+    }
+};
+typedef VulkanImageMemory VulkanPhantomImage;
 class VulkanResourceManager{
     // A thin layer on top of VMA. Along with some helper function for creating usable vk::Buffer and vk::Image etc.
-    //  You still need to manually manage both the `memory view` object and underlying `memory allocation` by yourself.
+    //  You still need to manage the lifetime of resources by yourself.
 public:
+    vma::Allocator allocator_{};
     VulkanResourceManager(const VulkanResourceManager &) = delete;
     VulkanResourceManager& operator= (const VulkanResourceManager &) = delete;
     VulkanResourceManager(VulkanResourceManager &&other) noexcept{
@@ -43,14 +115,16 @@ public:
             inst_ = other.inst_;
             physDev_ = other.physDev_;
             device_ = other.device_;
-            allocator_ = std::move(other.allocator_);
+            alloc_ = std::move(other.alloc_);
+            allocator_ = other.allocator_;
+            other.allocator_ = VK_NULL_HANDLE;
             queueIdxCGTP_ = other.queueIdxCGTP_;
         }
         return *this;
     }
     VulkanResourceManager() = default;
     VulkanResourceManager(vk::Instance instance, vk::PhysicalDevice physicalDevice, vk::Device device,
-                          QueueStruct queueCGTP) {
+                          utils::QueueStruct queueCGTP) {
         inst_ = instance;
         physDev_ = physicalDevice;
         device_ = device;
@@ -66,10 +140,10 @@ public:
         allocatorCreateInfo.pVulkanFunctions = &funcs;
         auto [result, alloc] = vma::createAllocatorUnique(allocatorCreateInfo);
         utils::vkEnsure(result);
-        allocator_ = std::move(alloc);
+        alloc_ = std::move(alloc);
         resCmdPool_ = CommandBufferManager{device_, {.queue = queue_, .queueFamilyIdx = queueIdxCGTP_}};
     }
-    VulkanResourceMemory<vk::Buffer> createBuffernMemory(
+    VulkanBufferMemory createBuffernMemory(
             const vk::DeviceSize bufferSize, const vk::BufferUsageFlags bufferUsage,
             const vma::AllocationCreateFlags vmaFlag, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto){
 
@@ -86,15 +160,18 @@ public:
         allocInfo.usage = vmaMemUsage;
         allocInfo.requiredFlags = memProps;
         vma::AllocationInfo auxInfo{};
-        auto [result, buffer] = allocator_->createBufferUnique(bufferInfo, allocInfo, &auxInfo);
+        auto [result, buffer] = alloc_->createBufferUnique(bufferInfo, allocInfo, &auxInfo);
         utils::vkEnsure(result);
-        VulkanResourceMemory<vk::Buffer> createdBuf{};
+        VulkanBufferMemory createdBuf{};
         createdBuf.resource = std::move(buffer.first);
         createdBuf.mem = std::move(buffer.second);
         createdBuf.auxInfo = auxInfo;
+        createdBuf.resInfo = bufferInfo;
+        createdBuf.resInfo.queueFamilyIndexCount = 0;
+        createdBuf.resInfo.pQueueFamilyIndices = nullptr;
         return std::move(createdBuf);
     }
-    VulkanResourceMemory<vk::Image> createImagenMemory(
+    VulkanImageMemory createImagenMemory(
             const vk::Extent3D extent, const vk::Format format, const vk::ImageTiling tiling,
             const vk::ImageLayout layout, const vk::ImageUsageFlags imageUsage,
             const vma::AllocationCreateFlags vmaFlag, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto){
@@ -119,14 +196,24 @@ public:
         allocInfo.usage = vmaMemUsage;
         allocInfo.requiredFlags = memProps;
         vma::AllocationInfo auxInfo{};
-        auto [result, image] = allocator_->createImageUnique(imageInfo, allocInfo, &auxInfo);
+        auto [result, image] = alloc_->createImageUnique(imageInfo, allocInfo, &auxInfo);
         utils::vkEnsure(result);
-        VulkanResourceMemory<vk::Image> createdBuf{};
-        createdBuf.resource = std::move(image.first);
-        createdBuf.mem = std::move(image.second);
-        createdBuf.auxInfo = auxInfo;
-        return std::move(createdBuf);
+        VulkanImageMemory createdImg{};
+        createdImg.resource = std::move(image.first);
+        createdImg.mem = std::move(image.second);
+        createdImg.auxInfo = auxInfo;
+        createdImg.resInfo = imageInfo;
+        createdImg.resInfo.queueFamilyIndexCount = 0;
+        createdImg.resInfo.pQueueFamilyIndices = nullptr;
+        return std::move(createdImg);
     }
+    VulkanBufferMemory createStagingBuffer(const vk::DeviceSize bufferSize){
+        using VmaFlagE = vma::AllocationCreateFlagBits;
+        return createBuffernMemory(
+                bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+                VmaFlagE::eHostAccessSequentialWrite|VmaFlagE::eMapped);
+    }
+
     //TODO: implement async copy helper
     static void copyBuffer(vk::Buffer srcBuffer, //vk::DeviceSize srcOffset,
                     vk::Buffer dstBuffer, //vk::DeviceSize dstOffset,
@@ -166,16 +253,13 @@ public:
     }
 
     template<class HostElementType>
-    VulkanResourceMemory<vk::Buffer> createBuffernMemoryFromHostData(
+    VulkanBufferMemory createBuffernMemoryFromHostData(
             const std::span<const HostElementType> hostData,
             const vk::BufferUsageFlags bufferUsage,
             const vma::AllocationCreateFlags vmaFlag, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto) {
         using BufUsage = vk::BufferUsageFlagBits;
-        using VmaFlagE = vma::AllocationCreateFlagBits;
         vk::DeviceSize bufferSize = hostData.size_bytes();
-        auto stagingBuffer = createBuffernMemory(
-                bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
-                VmaFlagE::eHostAccessSequentialWrite|VmaFlagE::eMapped);
+        auto stagingBuffer = createStagingBuffer(bufferSize);
         std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
         auto finalBuffer = createBuffernMemory(bufferSize, bufferUsage|BufUsage::eTransferDst, vmaFlag, memProps, vmaMemUsage);
         copyBuffer(stagingBuffer.resource.get(), finalBuffer.resource.get(), bufferSize, resCmdPool_);
@@ -183,10 +267,9 @@ public:
     }
     // Deprecated
     static void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
-                                      vk::Device &device,
-                                      vk::CommandPool &commandPool,
-                                      vk::Queue &graphicsQueue){
-        auto [barrier, sourceStage, destinationStage] = imgTransInfoBuilder(image, format, oldLayout, newLayout);
+                                      vk::Device &device, vk::CommandPool &commandPool, vk::Queue &graphicsQueue){
+        auto [barrier, sourceStage, destinationStage] = imgLayoutTransitionInfoBuilder(image, format, oldLayout,
+                                                                                       newLayout);
 
         {
             SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
@@ -195,7 +278,8 @@ public:
     }
 
     void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout){
-        auto [barrier, sourceStage, destinationStage] = imgTransInfoBuilder(image, format, oldLayout, newLayout);
+        auto [barrier, sourceStage, destinationStage] = imgLayoutTransitionInfoBuilder(image, format, oldLayout,
+                                                                                       newLayout);
 
         {
             auto singleTime = resCmdPool_.getSingleTimeCommandBuffer();
@@ -204,18 +288,14 @@ public:
     }
 
     template<class HostElementType>
-    VulkanResourceMemory<vk::Image> createImagenMemoryFromHostData(
+    VulkanImageMemory createImagenMemoryFromHostData(
             const std::span<const HostElementType> hostData,
             const vk::Extent3D extent, const vk::Format format, const vk::ImageTiling tiling,
             const vk::ImageLayout layout, const vk::ImageUsageFlags imageUsage,
             const vma::AllocationCreateFlags vmaFlag, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto) {
         using ImgUsage = vk::ImageUsageFlagBits;
-        using BufUsage = vk::BufferUsageFlagBits;
-        using VmaFlagE = vma::AllocationCreateFlagBits;
         vk::DeviceSize bufferSize = hostData.size_bytes();
-        auto stagingBuffer = createBuffernMemory(
-                bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
-                VmaFlagE::eHostAccessSequentialWrite|VmaFlagE::eMapped);
+        auto stagingBuffer = createStagingBuffer(bufferSize);
         std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
         auto finalImage = createImagenMemory(extent, format, tiling, layout, imageUsage|ImgUsage::eTransferDst, vmaFlag, memProps, vmaMemUsage);
         transitionImageLayout(finalImage.resource.get(), format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
@@ -229,7 +309,7 @@ private:
     static std::tuple<
             vk::ImageMemoryBarrier,
             vk::PipelineStageFlags,
-            vk::PipelineStageFlags> imgTransInfoBuilder(
+            vk::PipelineStageFlags> imgLayoutTransitionInfoBuilder(
                     vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout){
         vk::ImageMemoryBarrier barrier{};
         barrier.oldLayout = oldLayout;
@@ -266,7 +346,7 @@ private:
     vk::Instance inst_{};
     vk::PhysicalDevice physDev_{};
     vk::Device device_{};
-    vma::UniqueAllocator allocator_{};
+    vma::UniqueAllocator alloc_{};
     uint32_t queueIdxCGTP_{};
     vk::Queue queue_{};
     CommandBufferManager resCmdPool_{};

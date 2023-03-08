@@ -2,12 +2,13 @@
 // Created by berry on 2023/3/5.
 //
 
-#ifndef VKLEARN_DESCRIPTORS_HPP
-#define VKLEARN_DESCRIPTORS_HPP
+#ifndef VKLEARN_BINDINGS_MANAGEMENT_HPP
+#define VKLEARN_BINDINGS_MANAGEMENT_HPP
 class DescriptorManager{
 public:
     vk::DescriptorPool descriptorPool_{};
     typedef size_t LayoutIdx;
+    DescriptorManager() = default;
     DescriptorManager(const DescriptorManager &) = delete;
     DescriptorManager& operator= (const DescriptorManager &) = delete;
     explicit DescriptorManager(vk::Device device){
@@ -19,7 +20,8 @@ public:
             layoutSizes_ = other.layoutSizes_;
             numDescLayouts_ = other.numDescLayouts_;
             pool_ = std::move(other.pool_);
-            descriptorPool_ = other.descriptorPool_;
+            other.descriptorPool_ = VK_NULL_HANDLE;
+            descriptorPool_ = pool_.get();
         }
         return *this;
     }
@@ -66,7 +68,7 @@ public:
         pool_ = std::move(descriptorPool);
         descriptorPool_ = pool_.get();
     }
-    // TODO: give user the choice of managing lifetime of descriptor set by DescriptorManager.
+    // TODO: give user the choice to manage lifetimes of descriptor set by DescriptorManager.
     std::vector<vk::UniqueDescriptorSet> createDescriptorSets(const std::span<const vk::DescriptorSetLayout> layouts){
         vk::DescriptorSetAllocateInfo allocInfo{};
         allocInfo.descriptorPool = pool_.get();
@@ -80,7 +82,7 @@ public:
 
     void updateDescriptorSet(vk::DescriptorSet descriptorSet,
                              vk::Sampler sampler, vk::ImageView view, vk::ImageLayout layout,
-                             const vk::DescriptorSetLayoutBinding &bindInfo, uint32_t bindOffset, uint32_t bindRange){
+                             const vk::DescriptorSetLayoutBinding &bindInfo, uint32_t bindOffset, uint32_t numElements){
         vk::DescriptorImageInfo imageInfo{};
         imageInfo.imageLayout = layout;
         imageInfo.imageView = view;
@@ -91,7 +93,7 @@ public:
         descriptorWrite.dstBinding = bindInfo.binding;
         descriptorWrite.dstArrayElement = bindOffset;
         descriptorWrite.descriptorType = bindInfo.descriptorType;
-        descriptorWrite.descriptorCount = bindRange;
+        descriptorWrite.descriptorCount = numElements;
         descriptorWrite.pImageInfo = &imageInfo;
 
         updateDescriptorSet(descriptorWrite);
@@ -99,7 +101,7 @@ public:
 
     void updateDescriptorSet(vk::DescriptorSet descriptorSet,
                              vk::Buffer buffer, vk::DeviceSize bufferOffset, vk::DeviceSize bufferRange,
-                             const vk::DescriptorSetLayoutBinding &bindInfo, uint32_t bindOffset, uint32_t bindRange){
+                             const vk::DescriptorSetLayoutBinding &bindInfo, uint32_t bindOffset, uint32_t numElements){
         vk::DescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = buffer;
         bufferInfo.offset = bufferOffset;
@@ -110,7 +112,7 @@ public:
         descriptorWrite.dstBinding = bindInfo.binding;
         descriptorWrite.dstArrayElement = bindOffset;
         descriptorWrite.descriptorType = bindInfo.descriptorType;
-        descriptorWrite.descriptorCount = bindRange;
+        descriptorWrite.descriptorCount = numElements;
         descriptorWrite.pBufferInfo = &bufferInfo;
 
         updateDescriptorSet(descriptorWrite);
@@ -125,4 +127,4 @@ private:
     size_t numDescLayouts_{};
     vk::UniqueDescriptorPool pool_{};
 };
-#endif //VKLEARN_DESCRIPTORS_HPP
+#endif //VKLEARN_BINDINGS_MANAGEMENT_HPP

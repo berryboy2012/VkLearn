@@ -11,6 +11,7 @@
 #define VULKAN_HPP_ASSERT_ON_RESULT
 #include "vulkan/vulkan.hpp"
 #include "utils.h"
+#include "model_data.hpp"
 // Push constants seems to be slower than UBO
 struct ScenePushConstants {
     glm::mat4 view;
@@ -22,7 +23,8 @@ struct ModelUBO {
 class VertexShader{
 public:
     vk::UniqueShaderModule shaderModule_;
-    std::vector<vk::DescriptorSetLayoutBinding> descLayouts_{};
+    typedef size_t DescSetIdx;
+    std::unordered_map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> descLayouts_{};
     // Specific to vertex shaders
     std::vector<vk::VertexInputBindingDescription> inputInfos_{};
     std::vector<vk::VertexInputAttributeDescription> attrInfos_{};
@@ -53,6 +55,7 @@ public:
         shaderModule_ = utils::createShaderModule(filePath, device_);
         // filling descriptor set layout info
         {
+            DescSetIdx setIndex = 0;
             vk::DescriptorSetLayoutBinding modelUBOInfo{};
             modelUBOInfo.binding = 0;
             // If you want to specify an array of element objects, descriptorCount is the length of such array.
@@ -60,7 +63,7 @@ public:
             modelUBOInfo.descriptorType = vk::DescriptorType::eUniformBuffer;
             modelUBOInfo.pImmutableSamplers = nullptr;
             modelUBOInfo.stageFlags = vk::ShaderStageFlagBits::eVertex;
-            descLayouts_.push_back(modelUBOInfo);
+            descLayouts_[setIndex].push_back(modelUBOInfo);
         }
         // vertex inputs info
         {
@@ -112,7 +115,8 @@ private:
 class FragShader{
 public:
     vk::UniqueShaderModule shaderModule_;
-    std::vector<vk::DescriptorSetLayoutBinding> descLayouts_{};
+    typedef size_t DescSetIdx;
+    std::unordered_map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> descLayouts_{};
     // Other less frequent entries
 
     FragShader() = default;
@@ -135,13 +139,14 @@ public:
         shaderModule_ = utils::createShaderModule(filePath, device_);
         // filling descriptor set layout info
         {
+            DescSetIdx setIndex = 0;
             vk::DescriptorSetLayoutBinding texSamplerInfo{};
             texSamplerInfo.binding = 1;
             texSamplerInfo.descriptorCount = 1;
             texSamplerInfo.descriptorType = vk::DescriptorType::eCombinedImageSampler;
             texSamplerInfo.pImmutableSamplers = nullptr;
             texSamplerInfo.stageFlags = vk::ShaderStageFlagBits::eFragment;
-            descLayouts_.push_back(texSamplerInfo);
+            descLayouts_[setIndex].push_back(texSamplerInfo);
         }
     }
 private:

@@ -43,7 +43,8 @@ public:
     vk::PipelineColorBlendStateCreateInfo blendInfo_{};
 
     // Info needed to build descriptor set
-    std::vector<vk::DescriptorSetLayoutBinding> bindings_{};
+    typedef size_t DescSetIdx;
+    std::unordered_map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> bindings_{};
 
     static vk::PipelineVertexInputStateCreateInfo setVertexInputStateInfo(
             const std::span<const vk::VertexInputBindingDescription> binds,
@@ -156,11 +157,15 @@ public:
         blendInfo_ = setColorBlendStateInfo(colorInfos_);
 
         {
-            for (auto &bind: vertShader_.descLayouts_) {
-                bindings_.push_back(bind);
+            for (auto &bindSet: vertShader_.descLayouts_) {
+                for (auto &bind: bindSet.second){
+                    bindings_[bindSet.first].push_back(bind);
+                }
             }
-            for (auto &bind: fragShader_.descLayouts_) {
-                bindings_.push_back(bind);
+            for (auto &bindSet: fragShader_.descLayouts_) {
+                for (auto &bind: bindSet.second){
+                    bindings_[bindSet.first].push_back(bind);
+                }
             }
         }
 
@@ -169,16 +174,21 @@ public:
         // We cannot create vk::Pipeline object for now. Since renderpass and subpass are higher-level concepts.
     }
 
-    vk::DescriptorSetLayout getDescriptorLayout(){
-        if (!static_cast<bool>(descLayout_)){
-            descLayout_ = utils::createDescriptorSetLayout(bindings_, device_);
+    vk::DescriptorSetLayout getDescriptorLayout(DescSetIdx index){
+        if (!descLayout_.contains(index)){
+
+            descLayout_[index] = utils::createDescriptorSetLayout(bindings_.at(index), device_);
         }
-        return descLayout_.get();
+        return descLayout_[index].get();
     }
 
-    vk::Pipeline createPipeline(vk::RenderPass renderPass, uint32_t subpass){
+    vk::Pipeline createPipeline(vk::RenderPass renderPass, uint32_t subpass, std::span<const DescSetIdx> descriptorSetIndices){
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{};
-        pipelineLayoutInfo.setSetLayouts(getDescriptorLayout());
+        std::vector<vk::DescriptorSetLayout> layouts{};
+        for (auto& index: descriptorSetIndices){
+            layouts.push_back(getDescriptorLayout(index));
+        }
+        pipelineLayoutInfo.setSetLayouts(layouts);
         pipelineLayoutInfo.setPushConstantRanges(vertShader_.pushConstInfos_);
 
         auto [pLResult, pipelineLayout] = device_.createPipelineLayoutUnique(pipelineLayoutInfo);
@@ -204,9 +214,18 @@ public:
         pipe_ = std::move(graphicsPipeline);
         return pipe_.get();
     }
+
+    // Create pipeline with all descriptor set layouts.
+    vk::Pipeline createPipeline(vk::RenderPass renderPass, uint32_t subpass){
+        std::vector<DescSetIdx> layoutIndices{};
+        for (auto& setBind: bindings_){
+            layoutIndices.push_back(setBind.first);
+        }
+        return createPipeline(renderPass, subpass, layoutIndices);
+    }
 private:
     std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages_{};
-    vk::UniqueDescriptorSetLayout descLayout_{};
+    std::unordered_map<DescSetIdx, vk::UniqueDescriptorSetLayout> descLayout_{};
     vk::UniquePipelineLayout pipeLayout_{};
     vk::UniquePipeline pipe_{};
     vk::Device device_{};

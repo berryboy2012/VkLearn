@@ -86,7 +86,8 @@ const std::vector<PCTVertex> vertices = {
  * So here we follow the same convention and adjust parameters in VkPipelineRasterizationStateCreateInfo
  * accordingly.
  * */
-const std::vector<uint16_t> vertexIdx = {
+typedef uint16_t VertIdxType;
+const std::vector<VertIdxType> vertexIdx = {
         0, 1, 3,
         1, 2, 4,
         2, 0, 5,
