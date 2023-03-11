@@ -10,6 +10,7 @@
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #define VULKAN_HPP_ASSERT_ON_RESULT
 #include "vulkan/vulkan.hpp"
+#include "vk_mem_alloc.hpp"
 #include "utils.h"
 #include "model_data.hpp"
 // Push constants seems to be slower than UBO
@@ -19,6 +20,13 @@ struct ScenePushConstants {
 };
 struct ModelUBO {
     glm::mat4 model;
+};
+struct SubpassAttachmentReferences{
+    //TODO: add support for preserveAttachments
+    std::vector<vk::AttachmentReference2> inputAttachments;
+    std::vector<vk::AttachmentReference2> colorAttachments;
+    std::vector<vk::AttachmentReference2> resolveAttachments;
+    vk::AttachmentReference2 depthStencilAttachment;
 };
 class VertexShader{
 public:
@@ -38,7 +46,7 @@ public:
         *this = std::move(other);
     }
     VertexShader& operator= (VertexShader &&other) noexcept {
-        if (this != &other){
+        if (this != &other) [[likely]]{
             shaderModule_ = std::move(other.shaderModule_);
             descLayouts_ = other.descLayouts_;
             inputInfos_ = other.inputInfos_;
@@ -112,11 +120,30 @@ public:
 private:
     vk::Device device_;
 };
+struct AttachmentInfo{
+    // renderpass
+    vk::AttachmentDescription2 description{};
+    // framebuffer and image
+    vk::Format format{};
+    vk::ImageCreateFlags flags{};
+    vk::ImageUsageFlags usage{};
+    vk::ImageTiling tiling{};
+    vk::ImageLayout layout{};
+    vma::AllocationCreateFlags vmaFlag{};
+    // image view
+    vk::ImageAspectFlags aspect{};
+    // TODO: Corresponding ID in resource manager
+    std::string resId{};
+};
 class FragShader{
 public:
     vk::UniqueShaderModule shaderModule_;
     typedef size_t DescSetIdx;
+    typedef size_t AttachIdx;
     std::unordered_map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> descLayouts_{};
+    // Mandatory for fragment shaders
+    std::unordered_map<AttachIdx, AttachmentInfo> attachmentResourceInfos_{};
+    SubpassAttachmentReferences attachmentReferences_{};
     // Other less frequent entries
 
     FragShader() = default;
@@ -126,10 +153,12 @@ public:
         *this = std::move(other);
     }
     FragShader& operator= (FragShader &&other) noexcept {
-        if (this != &other){
+        if (this != &other) [[likely]]{
             shaderModule_ = std::move(other.shaderModule_);
             descLayouts_ = other.descLayouts_;
             device_ = other.device_;
+            attachmentResourceInfos_ = other.attachmentResourceInfos_;
+            attachmentReferences_ = other.attachmentReferences_;
         }
         return *this;
     }
@@ -148,8 +177,72 @@ public:
             texSamplerInfo.stageFlags = vk::ShaderStageFlagBits::eFragment;
             descLayouts_[setIndex].push_back(texSamplerInfo);
         }
+        // filling attachment info, only need to provide attachments first used by this shader
+        {
+            AttachIdx attachIndex = 0;
+            AttachmentInfo swapchainImageAttachmentInfo{};
+            // For swapchain image, we use the format determined by main thread
+            swapchainImageAttachmentInfo.description.format = {};
+            swapchainImageAttachmentInfo.description.samples = vk::SampleCountFlagBits::e1;
+            swapchainImageAttachmentInfo.description.loadOp = vk::AttachmentLoadOp::eClear;
+            swapchainImageAttachmentInfo.description.storeOp = vk::AttachmentStoreOp::eStore;
+            swapchainImageAttachmentInfo.description.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+            swapchainImageAttachmentInfo.description.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+            swapchainImageAttachmentInfo.description.initialLayout = vk::ImageLayout::eUndefined;
+            swapchainImageAttachmentInfo.description.finalLayout = vk::ImageLayout::ePresentSrcKHR;
+            // For swapchain images, we don't need image info
+            swapchainImageAttachmentInfo.flags = {};
+            swapchainImageAttachmentInfo.usage = {};
+            swapchainImageAttachmentInfo.format = {};
+            swapchainImageAttachmentInfo.tiling = {};
+            swapchainImageAttachmentInfo.layout = {};
+            swapchainImageAttachmentInfo.vmaFlag = {};
+            // Image view info are not needed as well
+            swapchainImageAttachmentInfo.aspect = vk::ImageAspectFlagBits::eColor;
+            attachmentResourceInfos_[attachIndex] = swapchainImageAttachmentInfo;
+        }
+        {
+            AttachIdx attachIndex = 1;
+            AttachmentInfo depthImageAttachmentInfo{};
+            // For depth image, we use the format determined by main thread
+            depthImageAttachmentInfo.description.format = {};
+            depthImageAttachmentInfo.description.samples = vk::SampleCountFlagBits::e1;
+            depthImageAttachmentInfo.description.loadOp = vk::AttachmentLoadOp::eClear;
+            depthImageAttachmentInfo.description.storeOp = vk::AttachmentStoreOp::eDontCare;
+            depthImageAttachmentInfo.description.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+            depthImageAttachmentInfo.description.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+            depthImageAttachmentInfo.description.initialLayout = vk::ImageLayout::eUndefined;
+            depthImageAttachmentInfo.description.finalLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+            // For depth image, some image info are provided by the main thread
+            depthImageAttachmentInfo.flags = {};
+            depthImageAttachmentInfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment;
+            depthImageAttachmentInfo.format = {};
+            depthImageAttachmentInfo.tiling = vk::ImageTiling::eOptimal;
+            depthImageAttachmentInfo.layout = vk::ImageLayout::eUndefined;
+            depthImageAttachmentInfo.vmaFlag = {};
+            // Image view info are needed
+            depthImageAttachmentInfo.aspect = vk::ImageAspectFlagBits::eDepth;
+            attachmentResourceInfos_[attachIndex] = depthImageAttachmentInfo;
+        }
+        // filling attachment references
+        {
+            attachmentReferences_.inputAttachments = {};
+            attachmentReferences_.resolveAttachments = {};
+            vk::AttachmentReference2 swapchainImageAttachmentRef{};
+            swapchainImageAttachmentRef.attachment = 0;
+            swapchainImageAttachmentRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
+            swapchainImageAttachmentRef.aspectMask = vk::ImageAspectFlagBits::eColor;
+            attachmentReferences_.colorAttachments.push_back(swapchainImageAttachmentRef);
+            vk::AttachmentReference2 depthImageAttachmentRef{};
+            depthImageAttachmentRef.attachment = 1;
+            depthImageAttachmentRef.layout = vk::ImageLayout::eDepthAttachmentOptimal;
+            depthImageAttachmentRef.aspectMask = vk::ImageAspectFlagBits::eDepth;
+            attachmentReferences_.depthStencilAttachment = depthImageAttachmentRef;
+        }
     }
 private:
     vk::Device device_;
 };
+
+
 #endif //VKLEARN_SHADER_MODULES_HPP

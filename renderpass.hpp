@@ -4,13 +4,9 @@
 
 #ifndef VKLEARN_RENDERPASS_HPP
 #define VKLEARN_RENDERPASS_HPP
-struct SubpassAttachmentReferences{
-    //TODO: add support for preserveAttachments
-    std::vector<vk::AttachmentReference2> inputAttachments;
-    std::vector<vk::AttachmentReference2> colorAttachments;
-    std::vector<vk::AttachmentReference2> resolveAttachments;
-    vk::AttachmentReference2 depthStencilAttachment;
-};
+
+#include "shader_modules.hpp"
+
 class Renderpass{
     //TODO: support pNext for related Vulkan info structs.
 public:
@@ -19,17 +15,22 @@ public:
     typedef size_t DependIdx;
 
     vk::RenderPass renderpass_{};
+    std::map<AttachIdx, AttachmentInfo> attachDescs_{};
+    std::vector<SubpassInfo> subpasses_{};
+    std::vector<SubpassAttachmentReferences> subpassRefs_{};
 
     Renderpass() = default;
     Renderpass& operator= (const Renderpass &) = delete;
     Renderpass(const Renderpass &) = delete;
     Renderpass& operator= (Renderpass && other) noexcept{
-        if (this != &other){
+        if (this != &other) [[likely]]{
             device_ = other.device_;
             attachDescs_ = other.attachDescs_;
             subpasses_ = other.subpasses_;
-            subpassAttachments_ = other.subpassAttachments_;
-            subpassDependencies_ = other.subpassDependencies_;
+            subpassRefs_ = other.subpassRefs_;
+            for (size_t i=0;i<subpasses_.size();i++){
+                setSubpassInfo(subpasses_[i], subpassRefs_[i]);
+            }
             pass_ = std::move(other.pass_);
             renderpass_ = pass_.get();
         }
@@ -47,130 +48,107 @@ public:
     //  any new attachments it introduces, which in turn are registered by corresponding pipelines
 
     // First register attachments, since attachments' info is referenced by vk::SubpassDescription2
-    std::vector<AttachIdx> registerSubpassAttachments(const std::span<const vk::AttachmentDescription2> attaches){
-        std::vector<AttachIdx> indices{};
-        for(auto& attach: attaches){
-            size_t index = attachDescs_.empty() ? 0 : attachDescs_.rbegin()->first+1;
-            attachDescs_[index] = attach;
-            indices.push_back(index);
-        }
-        return indices;
-    }
-    void unregisterSubpassAttachments(const std::span<const AttachIdx> indices){
-        for (auto& index: indices){
-            if (attachDescs_.contains(index)){
-                attachDescs_.erase(index);
-            }
-        }
-    }
-    // Register subpass before registering dependencies, as dependencies directly reference indices of subpasses.
-    //  When supplying vk::SubpassDescription2,
-    //  *(vk::SubpassDescription2::p{}Attachments)::attachment should use the index given when registering attachments.
-    //  This helper will take care of the conversion.
-    SubpassIdx registerSubpass(const vk::SubpassDescription2* subpassDescription){
-        SubpassIdx index = subpasses_.empty() ? 0 : subpasses_.rbegin()->first+1;
-        subpasses_[index] = *subpassDescription;
-        // Deep copy of referenced attachments
-        auto inputAttachView = std::span{subpasses_[index].pInputAttachments, subpasses_[index].inputAttachmentCount};
-        for (auto& attach: inputAttachView){
-            subpassAttachments_[index].inputAttachments.push_back(attach);
-        }
-        auto colorAttachView = std::span{subpasses_[index].pColorAttachments, subpasses_[index].colorAttachmentCount};
-        for (auto& attach: colorAttachView){
-            subpassAttachments_[index].colorAttachments.push_back(attach);
-        }
-        auto resolveAttachView = std::span{subpasses_[index].pResolveAttachments, subpasses_[index].colorAttachmentCount};
-        for (auto& attach: resolveAttachView){
-            subpassAttachments_[index].resolveAttachments.push_back(attach);
-        }
-        subpassAttachments_[index].depthStencilAttachment = *(subpasses_[index].pDepthStencilAttachment);
-        return index;
-    }
-    void unregisterSubpass(SubpassIdx index){
-        if(subpasses_.contains(index)){
-            subpasses_.erase(index);
-            subpassAttachments_.erase(index);
-        }
-    }
-    // Finally register dependencies between subpasses, vk::SubpassDependency2::{src/dst}Subpass should use the index
-    //  given when registering subpasses.
-    std::vector<DependIdx> registerSubpassDependencies(const std::span<const vk::SubpassDependency2> dependencies){
-        std::vector<DependIdx> indices{};
-        for (auto& depend: dependencies){
-            DependIdx index = subpassDependencies_.empty() ? 0 : subpassDependencies_.rbegin()->first+1;
-            subpassDependencies_[index] = depend;
-            indices.push_back(index);
-        }
-        return indices;
-    }
-    void unregisterSubpassDependencies(const std::span<const DependIdx> indices){
-        for (auto& index: indices){
-            if (subpassDependencies_.contains(index)){
-                subpassDependencies_.erase(index);
-            }
-        }
+    void registerSubpassAttachment(const AttachmentInfo &attach, AttachIdx index){
+        attachDescs_[index] = attach;
     }
 
-    vk::RenderPass createRenderpass(){
+    // Register subpass before registering dependencies, as dependencies directly reference indices of subpasses.
+    void registerSubpassInfo(const SubpassInfo &subpassDescription){
+        subpasses_.push_back(subpassDescription);
+        auto& subpassDesc = *subpasses_.rbegin();
+        // Deep copy of referenced attachments
+        subpassRefs_.push_back({});
+        auto& subRefs = *subpassRefs_.rbegin();
+        auto inputRefs = std::span<const vk::AttachmentReference2>{
+            subpassDesc.description.pInputAttachments, subpassDesc.description.inputAttachmentCount};
+        for (const auto& inputRef: inputRefs){
+            subRefs.inputAttachments.push_back(inputRef);
+        }
+        // Must have the same number of resolve attachments as color attachments
+        auto resolveRefs = std::span<const vk::AttachmentReference2>{
+                subpassDesc.description.pResolveAttachments, subpassDesc.description.colorAttachmentCount};
+        for (const auto& resolveRef: resolveRefs){
+            subRefs.resolveAttachments.push_back(resolveRef);
+        }
+        auto colorRefs = std::span<const vk::AttachmentReference2>{
+                subpassDesc.description.pColorAttachments, subpassDesc.description.colorAttachmentCount};
+        for (const auto& colorRef: colorRefs){
+            subRefs.colorAttachments.push_back(colorRef);
+        }
+        subRefs.depthStencilAttachment = *subpassDesc.description.pDepthStencilAttachment;
+        setSubpassInfo(subpassDesc, subRefs);
+    }
+
+    [[maybe_unused]] vk::RenderPass createRenderpass(){
         // Renderpass -- span<attachment>
         //        \\____ span<subpass>
         //         \                \____ several span<ref to attachment>: AttachIdx to index in span<attachment>
         //          \____ span<dependency>: SubpassIdx to index in span<subpass>
         //                              \____ ref to subpass: SubpassIdx to index in span<subpass>
-        std::vector<vk::AttachmentDescription2> attaches{};
-        std::map<AttachIdx, size_t> attachLUT{};
-        for (auto& desc: attachDescs_){
-            attachLUT[desc.first] = attaches.size();
-            attaches.push_back(desc.second);
+        std::vector<vk::AttachmentDescription2> attaches{}; attaches.resize(attachDescs_.size());
+        for (const auto& desc: attachDescs_){
+            attaches[desc.first] = desc.second.description;
         }
         std::vector<vk::SubpassDescription2> passes{};
-        std::vector<SubpassAttachmentReferences> passRefs{};
-        std::map<SubpassIdx, size_t> passLUT{};
-        for (auto& pass: subpasses_){
-            passLUT[pass.first] = passes.size();
-            passes.push_back(pass.second);
-            passRefs.push_back(subpassAttachments_.at(pass.first));
+        for (const auto& pass: subpasses_){
+            passes.push_back(pass.description);
         }
-        for (auto& passRef: passRefs){
-            for (auto& ref: passRef.inputAttachments){
-                ref.attachment = attachLUT[ref.attachment];
+        std::vector<vk::StructureChain<vk::SubpassDependency2, vk::MemoryBarrier2>> depends{};
+        for (const auto& pass: subpasses_){
+            for (const auto& depend: pass.dependencies){
+                depends.push_back(depend);
             }
-            for (auto& ref: passRef.colorAttachments){
-                ref.attachment = attachLUT[ref.attachment];
-            }
-            for (auto& ref: passRef.resolveAttachments){
-                ref.attachment = attachLUT[ref.attachment];
-            }
-            passRef.depthStencilAttachment.attachment = attachLUT[passRef.depthStencilAttachment.attachment];
-        }
-        std::vector<vk::SubpassDependency2> depends{};
-        for (auto& depend: subpassDependencies_){
-            depends.push_back(depend.second);
-        }
-        for (auto& depend: depends){
-            depend.srcSubpass = passLUT[depend.srcSubpass];
-            depend.dstSubpass = passLUT[depend.dstSubpass];
         }
         vk::RenderPassCreateInfo2 renderPassInfo = {};
         renderPassInfo.setAttachments(attaches);
         renderPassInfo.setSubpasses(passes);
-        renderPassInfo.setDependencies(depends);
+        renderPassInfo.dependencyCount = depends.size();
+        renderPassInfo.pDependencies = &depends.data()->get<vk::SubpassDependency2>();
 
         auto [result, renderPass] = device_.createRenderPass2Unique(renderPassInfo);
         utils::vkEnsure(result);
         pass_ = std::move(renderPass);
         renderpass_ = pass_.get();
+        return renderpass_;
     }
 
+    vk::UniqueFramebuffer createFramebuffer(vk::Extent2D extent){
+        std::vector<vk::FramebufferAttachmentImageInfo> attachInfos{}; attachInfos.resize(attachDescs_.size());
+        for (const auto& attach: attachDescs_){
+            vk::FramebufferAttachmentImageInfo info{};
+            info.usage = attach.second.usage;
+            info.flags = attach.second.flags;
+            info.height = extent.height;
+            info.width = extent.width;
+            info.layerCount = 1;
+            info.viewFormatCount = 1;
+            info.pViewFormats = &attach.second.format;
+            attachInfos[attach.first] = info;
+        }
+        vk::FramebufferAttachmentsCreateInfo attachmentsInfo{};
+        attachmentsInfo.setAttachmentImageInfos(attachInfos);
+        vk::FramebufferCreateInfo framebufferInfo = {};
+        framebufferInfo.renderPass = renderpass_;
+        framebufferInfo.width = extent.width;
+        framebufferInfo.height = extent.height;
+        framebufferInfo.layers = 1;
+        framebufferInfo.flags |= vk::FramebufferCreateFlagBits::eImageless;
+        framebufferInfo.attachmentCount = attachmentsInfo.attachmentImageInfoCount;
+        framebufferInfo.pAttachments = VK_NULL_HANDLE;
+        framebufferInfo.pNext = &attachmentsInfo;
+        auto [result, fb] = device_.createFramebufferUnique(framebufferInfo);
+        utils::vkEnsure(result);
+        return std::move(fb);
+    }
 
 private:
+    static void setSubpassInfo(SubpassInfo &subpassInfo, SubpassAttachmentReferences &attachRefs){
+        subpassInfo.description.setColorAttachments(attachRefs.colorAttachments);
+        subpassInfo.description.setInputAttachments(attachRefs.inputAttachments);
+        subpassInfo.description.setResolveAttachments(attachRefs.resolveAttachments);
+        subpassInfo.description.pDepthStencilAttachment = &attachRefs.depthStencilAttachment;
+    }
     vk::Device device_{};
-    std::map<AttachIdx, vk::AttachmentDescription2> attachDescs_{};
-
-    std::map<SubpassIdx, vk::SubpassDescription2> subpasses_{};
-    std::map<SubpassIdx, SubpassAttachmentReferences> subpassAttachments_{};
-
-    std::map<DependIdx, vk::SubpassDependency2> subpassDependencies_{};
 
     vk::UniqueRenderPass pass_{};
 };

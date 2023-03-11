@@ -22,7 +22,7 @@ SingleTimeCommandBuffer::SingleTimeCommandBuffer(SingleTimeCommandBuffer &&other
 }
 
 SingleTimeCommandBuffer& SingleTimeCommandBuffer::operator= (SingleTimeCommandBuffer &&other) noexcept {
-    if (this != &other){
+    if (this != &other) [[likely]]{
         coBuf = other.coBuf;
         other.coBuf = VK_NULL_HANDLE;
         isCmdBufRetired_ = other.isCmdBufRetired_;
@@ -75,7 +75,7 @@ CommandBufferManager::CommandBufferManager(CommandBufferManager &&other) noexcep
         *this = std::move(other);
 }
 CommandBufferManager& CommandBufferManager::operator= (CommandBufferManager &&other) noexcept{
-    if (this != &other){
+    if (this != &other) [[likely]]{
         device_ = other.device_;
         queueCGTP_ = other.queueCGTP_;
         queueFamilyIdxCGTP_ = other.queueFamilyIdxCGTP_;

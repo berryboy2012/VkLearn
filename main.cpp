@@ -18,7 +18,10 @@
 #include <openvr.h>
 
 // Required by Vulkan-Hpp (https://github.com/KhronosGroup/Vulkan-Hpp#extensions--per-device-function-pointers)
+#ifndef VK_DYNAMIC_DISPATCHER
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
+#define VK_DYNAMIC_DISPATCHER
+#endif
 #ifdef min
     #undef min
 #endif
@@ -527,12 +530,13 @@ vk::UniqueRenderPass createRenderPassSDL(const vk::Format &swapChainImageFormat,
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
     vk::SubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests;
-    dependency.srcAccessMask = vk::AccessFlags{};
-    dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests;
-    dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+//    dependency.dependencyFlags = vk::DependencyFlagBits::eByRegion;
+//    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+//    dependency.dstSubpass = 0;
+//    dependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests;
+//    dependency.srcAccessMask = vk::AccessFlags{};
+//    dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests;
+//    dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
 
     std::array<vk::AttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
     vk::RenderPassCreateInfo renderPassInfo = {};
@@ -540,8 +544,8 @@ vk::UniqueRenderPass createRenderPassSDL(const vk::Format &swapChainImageFormat,
     renderPassInfo.pAttachments = attachments.data();
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 1;
-    renderPassInfo.pDependencies = &dependency;
+    renderPassInfo.dependencyCount = 0;//1;
+    renderPassInfo.pDependencies = VK_NULL_HANDLE;//&dependency;
 
     auto [result, renderPass] = device.createRenderPassUnique(renderPassInfo);
     utils::vkEnsure(result);
@@ -750,6 +754,7 @@ int main(int argc, char *argv[]) {
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
         }
         else{
+            rt_render::setupRTRender(chosenPhysicalDevice, vkUniqueDevice.get(), imagesPackSDL.extent, graphQueueIdx, renderPassSDL.get(), vkCommandPool.get(), graphicsQueue);
             auto waitResult = vkUniqueDevice->waitIdle();
             utils::vkEnsure(waitResult);
             {

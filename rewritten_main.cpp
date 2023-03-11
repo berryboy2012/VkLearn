@@ -19,9 +19,6 @@
 #include <vulkan/vulkan.hpp>
 #include <SDL2/SDL_vulkan.h>
 #include <openvr.h>
-
-// Required by Vulkan-Hpp (https://github.com/KhronosGroup/Vulkan-Hpp#extensions--per-device-function-pointers)
-VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #ifdef min
 #undef min
 #endif
@@ -29,7 +26,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #undef max
 #endif
 #include "utils.h"
-
+#include "global_objects.hpp"
 struct QueueFamilyProps{
     vk::QueueFamilyProperties2 props{};
     bool supportsSurface{};
@@ -43,10 +40,6 @@ struct PhysicalDeviceInfo{
     std::vector<vk::SurfaceFormat2KHR> surfaceFmts{};
     std::vector<vk::PresentModeKHR> surfacePres{};
 };
-std::vector<vk::UniqueImageView> createImageViews(
-        const std::span<vk::Image>& images,
-        const vk::Format &format, const vk::ImageAspectFlags &imageAspect,
-        vk::Device &device);
 
 #include "shader_modules.hpp"
 #include "graphics_pipeline.hpp"
@@ -161,6 +154,11 @@ queryPhysicalDeviceInfo(const vk::PhysicalDevice chosenPhysicalDevice, vk::Uniqu
 std::vector<std::string> getRequiredDeviceExtensions(){
     std::vector< std::string > requiredDeviceExtensions{
             VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+            // We want robust interaction with window subsystem (in the future, as device support is non-existent ATM)
+            //VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,
+            //VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+            VK_KHR_PRESENT_ID_EXTENSION_NAME,
+            VK_KHR_PRESENT_WAIT_EXTENSION_NAME,
             // Vulkan Ray Tracing (https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/#raytracingsetup)
             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
@@ -178,20 +176,25 @@ std::vector<std::string> getRequiredDeviceExtensions(){
 }
 
 // A jank way to store a linked list of VkPhysDevFeatures, the first element can be retrieved by std::any_cast<vk::PhysicalDeviceFeatures2&>.
-// Should use vk::StructureChain instead. Do not copy the returned list!
+// Should use vk::StructureChain instead. The returned list is not copy-able!
 std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &device){
     using Feature2 = vk::PhysicalDeviceFeatures2;
     // https://vulkan.lunarg.com/doc/view/1.3.239.0/windows/1.3-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pNext-02829
     using Vulkan11 = vk::PhysicalDeviceVulkan11Features;
     // https://vulkan.lunarg.com/doc/view/1.3.239.0/windows/1.3-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pNext-02830
-    using Vulkan12 = vk::PhysicalDeviceVulkan12Features;
+    using Vulkan12 = vk::PhysicalDeviceVulkan12Features;// Contains VK_KHR_imageless_framebuffer
     // https://vulkan.lunarg.com/doc/view/1.3.239.0/windows/1.3-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pNext-06532
     using Vulkan13 = vk::PhysicalDeviceVulkan13Features;
     using ASFeature = vk::PhysicalDeviceAccelerationStructureFeaturesKHR;
     using RTPFeature = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR;
     using VIDSFeature = vk::PhysicalDeviceVertexInputDynamicStateFeaturesEXT;
     using RayFeature = vk::PhysicalDeviceRayQueryFeaturesKHR;
+    using PresIDFeature = vk::PhysicalDevicePresentIdFeaturesKHR;
+    using PresWFeature = vk::PhysicalDevicePresentWaitFeaturesKHR;
+    //using SCMntn = vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT;
     // Add your feature requirements below
+
+    //Add your feature requirements above
     auto featureList = std::vector<std::any>{};
     featureList.push_back(Feature2{});
     featureList.push_back(ASFeature{});
@@ -201,7 +204,12 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     featureList.push_back(Vulkan13{});
     featureList.push_back(VIDSFeature{});
     featureList.push_back(RayFeature{});
-    // And here
+    featureList.push_back(PresIDFeature{});
+    featureList.push_back(PresWFeature{});
+    //featureList.push_back(SCMntn{});
+    // And below here
+
+    // And above here
     std::any_cast<Feature2&>(featureList[0]).pNext = (void*)&std::any_cast<ASFeature&>(featureList[1]);
     std::any_cast<ASFeature&>(featureList[1]).pNext = (void*)&std::any_cast<RTPFeature&>(featureList[2]);
     std::any_cast<RTPFeature&>(featureList[2]).pNext = (void*)&std::any_cast<Vulkan11&>(featureList[3]);
@@ -209,7 +217,12 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     std::any_cast<Vulkan12&>(featureList[4]).pNext = (void*)&std::any_cast<Vulkan13&>(featureList[5]);
     std::any_cast<Vulkan13&>(featureList[5]).pNext = (void*)&std::any_cast<VIDSFeature&>(featureList[6]);
     std::any_cast<VIDSFeature&>(featureList[6]).pNext = (void*)&std::any_cast<RayFeature&>(featureList[7]);
-    // And here
+    std::any_cast<RayFeature&>(featureList[7]).pNext = (void*)&std::any_cast<PresIDFeature&>(featureList[8]);
+    std::any_cast<PresIDFeature&>(featureList[8]).pNext = (void*)&std::any_cast<PresWFeature&>(featureList[9]);
+    //std::any_cast<RayFeature&>(featureList[]).pNext = (void*)&std::any_cast<SCMntn&>(featureList[]);
+    // And below here
+
+    // And above here
     device.getFeatures2(&std::any_cast<Feature2&>(featureList[0]));
     return featureList;
 }
@@ -285,25 +298,32 @@ vk::UniqueSurfaceKHR createSurfaceSDL(SDL_Window *p_SDLWindow, const vk::Instanc
     auto surface = vk::UniqueSurfaceKHR(tmpSurface, vkInstance);
     return std::move(surface);
 }
-vk::Format findSupportedFormat(
-        const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features,
-        const vk::PhysicalDevice &physicalDevice) {
-    for (vk::Format format : candidates) {
-        auto props = physicalDevice.getFormatProperties2(format);
 
-        if (tiling == vk::ImageTiling::eLinear && (props.formatProperties.linearTilingFeatures & features) == features){
-            return format;
-        } else if (tiling == vk::ImageTiling::eOptimal && (props.formatProperties.optimalTilingFeatures & features) == features) {
-            return format;
+vk::Format findQualifiedDepthFormat(const PhysicalDeviceInfo &physicalDeviceProps){
+    std::array<vk::Format, 3> depthCandidates = {
+            vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint};
+    std::array<std::tuple<vk::ImageTiling, vk::FormatFeatureFlags>, 1> tilingReqs{{
+        {vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment}
+        //{eLinear, e...}
+    }};
+    for (const auto& fmt: depthCandidates){
+        const auto& fmtFeats = physicalDeviceProps.formats.at(fmt).formatProperties;
+        for (const auto& req: tilingReqs){
+            switch (std::get<0>(req)) {
+                case vk::ImageTiling::eOptimal:
+                    if ((std::get<1>(req) & fmtFeats.optimalTilingFeatures) == std::get<1>(req)){
+                        return fmt;
+                    }
+                    break;
+                case vk::ImageTiling::eLinear:
+                    if ((std::get<1>(req) & fmtFeats.linearTilingFeatures) == std::get<1>(req)){
+                        return fmt;
+                    }
+                default:std::abort();//Not implemented
+            }
         }
     }
     std::abort();
-}
-vk::Format findDepthFormat(const vk::PhysicalDevice &physicalDevice) {
-    return findSupportedFormat(
-            {vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
-            vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment,
-            physicalDevice);
 }
 bool wantExitSDL(){
     SDL_Event sdlEvent;
@@ -465,7 +485,8 @@ int main(int argc, char *argv[]) {
      *  Query third-party libs for other device extension and feature requirements
      * Create vk::Device
      -------- Things below will happen again as we recover from surface size changes --------
-     * Create vk::SwapchainKHR, its vk::Image, and vk::ImageView
+     * Create vk::SwapchainKHR, its vk::Image, and vk::ImageView. Depth image can be created by renderer
+     * Create one semaphore for each in-flight frame, renderer will signal the provided semaphore when completed rendering
      * Get one vk::Queue for each vulkan-related threads
      *
      * End of global objects initialization
@@ -492,22 +513,24 @@ int main(int argc, char *argv[]) {
     auto featureList = getRequiredDeviceFeatures2(chosenPhysicalDevice);
     auto deviceExtensions = getRequiredDeviceExtensions();
     auto device = vk::UniqueDevice{};
-    size_t numQueues = 2;// One for global commands, one for the single-thread renderer.
+    size_t numQueues = INFLIGHT_FRAMES+1;// One for global commands, rest for the renderers.
     uint32_t queueFamilyIndex{};
     {
-        auto queueFamilyIdx = findQualifiedQueueFamily(physicalDeviceProps, numQueues);
-        if (!queueFamilyIdx.has_value()) {
+        auto queueFamIdx = findQualifiedQueueFamily(physicalDeviceProps, numQueues);
+        if (!queueFamIdx.has_value()) {
             std::abort();
         }
-        queueFamilyIndex = queueFamilyIdx.value();
+        queueFamilyIndex = queueFamIdx.value();
     }
     device = createVulkanDevice(chosenPhysicalDevice, featureList, deviceExtensions, queueFamilyIndex, numQueues);
     // Setup DynamicLoader (device-wide)
     VULKAN_HPP_DEFAULT_DISPATCHER.init(device.get());
     auto swapchainFormat = findQualifiedSurfaceFormat2(physicalDeviceProps.surfaceFmts);
     auto swapchainPresentMode = findQualifiedPresentMode(physicalDeviceProps.surfacePres);
+    auto depthFormat = findQualifiedDepthFormat(physicalDeviceProps);
     // -------- Repetitive --------
-    uint32_t swapchainImageCount = 3;
+    uint32_t swapchainImageCount = INFLIGHT_FRAMES+1;// It has nothing to do with in-flight frames! Driver may not adhere to it.
+    // Cannot be smaller than INFLIGHT_FRAMES
     swapchainImageCount = std::clamp(swapchainImageCount,
                                      physicalDeviceProps.surfaceCaps.surfaceCapabilities.minImageCount,
                                      physicalDeviceProps.surfaceCaps.surfaceCapabilities.maxImageCount);
@@ -515,48 +538,192 @@ int main(int argc, char *argv[]) {
     auto swapchain = createSwapchain(device.get(), physicalDeviceProps,
                                      surfaceExtent, swapchainFormat, swapchainPresentMode, swapchainImageCount,
                                      surfaceSDL.get());
-    auto swapchainImages = std::vector<vk::Image>{};
+    size_t globalQueueIndex = INFLIGHT_FRAMES;
+    auto globalQueue = utils::QueueStruct{.queue = device->getQueue(queueFamilyIndex, globalQueueIndex), .queueFamilyIdx = queueFamilyIndex};
+    auto swapchainImagenViews = std::vector<VulkanImageHandle>{};
     {
         auto [result, imgs] = device->getSwapchainImagesKHR(swapchain.get());
         utils::vkEnsure(result);
-        swapchainImages = imgs;
+        for (const auto& img: imgs){
+            VulkanImageHandle imgHandle{};
+            imgHandle.resource = img;
+            imgHandle.resInfo.mipLevels = 1;
+            imgHandle.resInfo.arrayLayers = 1;
+            imgHandle.resInfo.imageType = vk::ImageType::e2D;
+            //imgHandle.resInfo.flags = {};
+            imgHandle.resInfo.format = swapchainFormat.surfaceFormat.format;
+            //imgHandle.resInfo.usage = vk::ImageUsageFlagBits::eColorAttachment;
+            imgHandle.resInfo.extent = {{.width = surfaceExtent.width, .height = surfaceExtent.height, .depth = 1}};
+            imgHandle.resInfo.tiling = vk::ImageTiling::eOptimal;
+            imgHandle.resInfo.samples = vk::SampleCountFlagBits::e1;
+            imgHandle.resInfo.sharingMode = vk::SharingMode::eExclusive;
+            imgHandle.resInfo.initialLayout = vk::ImageLayout::ePresentSrcKHR;
+            imgHandle.createView(vk::ImageAspectFlagBits::eColor);
+            swapchainImagenViews.push_back(std::move(imgHandle));
+        }
     }
-    swapchainImageCount = swapchainImages.size();
+    swapchainImageCount = swapchainImagenViews.size();
 
-    size_t globalQueueIndex = 0;
-    auto globalQueue = utils::QueueStruct{.queue = device->getQueue(queueFamilyIndex, globalQueueIndex), .queueFamilyIdx = queueFamilyIndex};
-    size_t INFLIGHT_FRAMES = 2;
+    auto globalResMgr = VulkanResourceManager{instance.get(), chosenPhysicalDevice, device.get(), globalQueue};
 
+    /* During rendering loop, the main thread should orchestrate the following things:
+     * Check whether surface size is changed
+     * For each loop, only one swapchain image is issued to one thread, and only one image is brought to presentation
+     * (thread count should be the same as `INFLIGHT_FRAMES`, thus each thread only has one frame in-flight):
+     *  Acquire swapchain image, image view, and check whether its size has changed, as the acquired image index may not
+     *  be ready for rendering.
+     *  The sync settings when calling vkAcquireNextImageKHR are:
+     *   Signal "isImageAvailable" semaphore for this iteration's thread
+     *   Signal a "isResourceFree" fence, when this fence is signaled, the resource used when presenting the __acquired image__ can be freed.
+     *    The thread starts its pacing-insensitive tasks for the frame
+     *    The thread waits for thread's own "isImagePresented fence"(vkWaitForPresentKHR uses presentId as "fence"'s identifier)
+     *    The thread starts its non-submission tasks
+     *    The thread waits the main thread to give the index of a workable swapchain image
+     *     Vulkan does not participate in CPU-CPU syncs, thus C++ threading facilities are needed.
+     *    The thread starts submitting commands, with the following sync settings:
+     *     Waits the "isImageAvailable" semaphore at color attachment stage.
+     *     Signals the "isRenderingComplete" semaphore given by the main thread once swapchain image's attachment has
+     *     been written with final contents.
+     *    After submission, the thread can notify the main thread that it had consumed the given image.
+     *  Present next thread's rendered image (in terms of timeline, "next" means the oldest among in-flight frames)
+     *  with the following sync settings:
+     *   Wait the "isRenderingComplete" semaphore
+     *   Supply vk::PresentIdKHR with presentId equal to next thread's index to prepare for next thread's "isImagePresented fence"
+     *   //Signal "isResourceFree" fence for resource destruction.
+     *   //(Impossible to set fence here for now, as device support for VK_EXT_swapchain_maintenance1 is non-existent)
+     *  Wait for the next thread to consume the given swapchain image.
+     * Iterate to the next frame
+     * */
+    /* To handle swapchain resize events, we need even more sync:
+     * When the main thread is notified through vkAcquireNextImageKHR or vkQueuePresentKHR,
+     *  The main thread sets "isSwapchainInvalid" atomic for all rendering threads.
+     * Then the main thread waits all rendering threads to terminate.
+     *   The rendering thread needs to check "isSwapchainInvalid" atomic before waiting anything signaled by main thread.
+     *   This includes "isImageViewHandleAcquired" semaphore and "isImagePresented fence".
+     *   The rendering thread now needs to check "isSwapchainInvalid" atomic when waiting every fence and semaphore:
+     *    Since we don't need to rush when resetting swapchain, the waiting time can be set to a fairly large value.
+     *    We now need a loop and use std::binary_semaphore::try_acquire_for() when waiting for "isImageViewHandleAcquired" semaphore.
+     *    When waiting "isImagePresented fence", we have an infinite loop. Inside the loop, we set a time limit when
+     *     calling vkWaitForPresentKHR, for each iteration we check the atomic.
+     * After all rendering threads are terminated, the main thread can start its reset procedure.
+     * */
+    auto imageAvailableSemaphores = std::vector<vk::UniqueSemaphore>{};
+    for (size_t i=0;i<INFLIGHT_FRAMES;++i){
+        auto [result, sema] = device->createSemaphoreUnique({});
+        utils::vkEnsure(result);
+        imageAvailableSemaphores.push_back(std::move(sema));
+    }
+    auto renderCompleteSemaphores = std::vector<vk::UniqueSemaphore>{};
+    for (size_t i=0;i<INFLIGHT_FRAMES;++i){
+        auto [result, sema] = device->createSemaphoreUnique({});
+        utils::vkEnsure(result);
+        renderCompleteSemaphores.push_back(std::move(sema));
+    }
+    initializeMainSyncObjs();
+/* Renderer need the following global handles for initialization:
+ * vk::Instance, vk::PhysicalDevice,
+ * vk::Device, vk::Queue and its queueFamily index
+ * Info for creating depth resources
+ * Handle for "isImageAvailable" semaphore and "isRenderComplete"
+ * During rendering, it also needs:
+ * vk::Image and corresponding vk::ImageView from swapchain
+ *
+ * */
 {
+    // Things provided by main thread at start
+    auto inflightIndex = size_t{0};
+    auto inst = instance.get(); auto physDev = chosenPhysicalDevice; auto renderDev = device.get();
+    auto renderQueue = utils::QueueStruct{.queue = renderDev.getQueue(queueFamilyIndex, inflightIndex), .queueFamilyIdx = queueFamilyIndex};
+    auto resMgr = globalResMgr.getManagerHandle();
+    auto renderExtent = surfaceExtent; auto viewport = getViewportInfo(renderExtent.width, renderExtent.height); auto renderDepthFmt = depthFormat;
+    auto imageAvailableSemaphore = imageAvailableSemaphores[inflightIndex].get();
+    auto renderCompleteSemaphore = renderCompleteSemaphores[inflightIndex].get();
+
     /*The order of preparing stuffs:
-     * Pipeline
      * Descriptor
-     * Renderpass
-     * Attachment requested resources and FrameBuffers
+     * Renderpass and Image-less FrameBuffer
+     * Attachment requested resources
      * Descriptor requested resources
      *
      * */
-    // Swapchain for SDL2's surface and corresponding imagesPack
-//    auto [swapchainSDL, imagesPackSDL] = createSwapChainnImages(chosenPhysicalDevice, surfaceSDL.get(), p_SDLWindow,
-//                                                                device.get());
-//    auto imageViewsSDL = createImageViews(imagesPackSDL.images, imagesPackSDL.format, vk::ImageAspectFlagBits::eColor,
-//                                          device.get());
-//    auto viewport = getViewportInfo(imagesPackSDL.extent.width, imagesPackSDL.extent.height);
-//    auto graphPipe = GraphicsPipeline<VertexShader, FragShader>{device.get(), viewport};
-//    auto descMgr = DescriptorManager{device.get()};
-//    for (auto& setBind: graphPipe.bindings_){
-//        std::vector<vk::DescriptorSetLayoutBinding> layoutBinds{};
-//        for (auto& bind: setBind.second){
-//            layoutBinds.push_back(bind);
-//        }
-//        descMgr.registerDescriptorBindings(layoutBinds);
-//    }
-//
-//    auto resMgr = VulkanResourceManager{instance.get(), chosenPhysicalDevice, device.get(), {.queue = queues[1], .queueFamilyIdx = graphQueueIdx}};
-//    auto commandMgrs = std::vector<CommandBufferManager>{};
-//    for (size_t i=0;i<INFLIGHT_FRAMES;++i){
-//        commandMgrs.emplace_back(CommandBufferManager{device.get(), {.queue = queues[0], .queueFamilyIdx = graphQueueIdx}});
-//    }
+
+    auto descMgr = DescriptorManager{renderDev};
+    auto cmdMgr = CommandBufferManager{renderDev, renderQueue};
+    resMgr.setupManagerHandle(renderQueue);
+
+    /* Build a renderpass:
+     *   For each subpass inside a renderpass:
+     *     Get its pipeline.
+     *     Scan its descriptors and
+     *     Register its descriptor layouts.
+     *     Get its attachment requirements:
+     *       Input attachments can be found at fragment shader's spirv_cross::ShaderResources.subpass_inputs,
+     *        with its type being Image
+     *       Color attachments can be found at fragment shader's spirv_cross::ShaderResources.stage_outputs
+     *       Resolve attachments can be found at fragment shader's spirv_cross::ShaderResources.subpass_inputs,
+     *        with its type being SampledImage and SPIRType::image::ms being true
+     *       Depth attachment is determined by vk::PipelineDepthStencilStateCreateInfo of the pipeline
+     *     Create its pipeline layout object.
+     *     Register subpass' attachments to the renderpass.
+     *
+     *   Then for each subpass:
+     *     Register subpass' SubpassInfo object.
+     *   Now we can create the renderpass object.
+     *   Create an image-less frameBuffer with all registered attachments included.
+     * */
+
+    // First, get the pipeline of a subpass
+    auto graphPipe = GraphicsPipeline<VertexShader, FragShader>{renderDev, viewport};
+    // Loop over each descriptor set
+    for (auto& setBind: graphPipe.bindings_){
+        std::vector<vk::DescriptorSetLayoutBinding> layoutBinds{};
+        // Loop over each descriptor in one set
+        for (auto& bind: setBind.second){
+            layoutBinds.push_back(bind);
+        }
+        // We don't need to unregister later, don't record index for now.
+        descMgr.registerDescriptorBindings(layoutBinds);
+    }
+    auto graphPipeLayout = graphPipe.createPipelineLayout();
+
+    auto renderpassMgr = Renderpass{renderDev};
+
+    for (const auto& attach: graphPipe.fragShader_.attachmentResourceInfos_){
+        renderpassMgr.registerSubpassAttachment(attach.second, attach.first);
+    }
+
+    renderpassMgr.registerSubpassInfo(graphPipe.subpassInfo_);
+
+    renderpassMgr.createRenderpass();
+    // Must create renderpass object before creating framebuffer
+    auto frameBuffer = renderpassMgr.createFramebuffer(renderExtent);
+
+    // here we just hard-code everything
+    /*Create attachment requested resources
+     * Loop over attachments:
+     *   Inspect info to determine whether the vk::ImageView object needs to be created by us
+     *   If we need to create vk::ImageView, check whether we need to create vk::Image as well ()
+     * */
+
+    for (const auto& attach: renderpassMgr.attachDescs_){
+        if (attach.second.description.finalLayout == vk::ImageLayout::ePresentSrcKHR){
+            // don't need to create imageview for swapchain image
+            continue;
+        }
+        if ((attach.second.usage & vk::ImageUsageFlagBits::eTransientAttachment) == vk::ImageUsageFlagBits::eTransientAttachment){
+            // it's transient attachment, only lazily allocated resources required.
+            continue;
+        }
+        if (attach.second.description.initialLayout == vk::ImageLayout::eUndefined){
+            // it's output image, no need to transfer data from host.
+            continue;
+        }
+        if (attach.second.description.finalLayout == vk::ImageLayout::eDepthAttachmentOptimal){
+            // it's depth image, no need to transfer data from host.
+            continue;
+        }
+    }
+
 }
 }
 

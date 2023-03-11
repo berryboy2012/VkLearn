@@ -3,6 +3,12 @@
 //
 #ifndef VKLEARN_GRAPHICS_PIPELINE_HPP
 #define VKLEARN_GRAPHICS_PIPELINE_HPP
+struct SubpassInfo{
+    typedef size_t SubpassIdx;
+    SubpassIdx index;
+    vk::SubpassDescription2 description;
+    std::vector<vk::StructureChain<vk::SubpassDependency2, vk::MemoryBarrier2>> dependencies;
+};
 struct ViewportInfo{
     vk::Viewport viewport{};
     vk::Rect2D scissor{};
@@ -46,6 +52,9 @@ public:
     typedef size_t DescSetIdx;
     std::unordered_map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> bindings_{};
 
+    // Info about sync between subpasses
+    SubpassInfo subpassInfo_{};
+
     static vk::PipelineVertexInputStateCreateInfo setVertexInputStateInfo(
             const std::span<const vk::VertexInputBindingDescription> binds,
             const std::span<const vk::VertexInputAttributeDescription> attrs){
@@ -77,7 +86,7 @@ public:
     //  are preventing the object from being trivially copyable. In practice one should just initialize another object instead.
     //  After creating the piepline object, moving a pipeline around is even stranger.
     GraphicsPipeline& operator= (GraphicsPipeline<VS, FS> &&other) noexcept {
-        if (this != &other){
+        if (this != &other) [[likely]]{
             device_ = other.device_;
             vertShader_ = std::move(other.vertShader_);
             fragShader_ = std::move(other.fragShader_);
@@ -93,6 +102,7 @@ public:
             blendInfo_ = setColorBlendStateInfo(colorInfos_);
             shaderStages_ = other.shaderStages_;
             bindings_ = other.bindings_;
+            subpassInfo_ = setSubpassInfo();
             descLayout_ = std::move(other.descLayout_);
             pipeLayout_ = std::move(other.pipeLayout_);
             pipe_ = std::move(other.pipe_);
@@ -169,6 +179,9 @@ public:
             }
         }
 
+        // filling subpass info, only need to fill the dependencies that this pipeline is waiting for
+        setSubpassInfo();
+
         // Maybe it is not a good time to create vk::PipelineLayout object right now, since descriptor set are not trivial to manage.
 
         // We cannot create vk::Pipeline object for now. Since renderpass and subpass are higher-level concepts.
@@ -182,7 +195,7 @@ public:
         return descLayout_[index].get();
     }
 
-    vk::Pipeline createPipeline(vk::RenderPass renderPass, uint32_t subpass, std::span<const DescSetIdx> descriptorSetIndices){
+    vk::PipelineLayout createPipelineLayout(std::span<const DescSetIdx> descriptorSetIndices){
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{};
         std::vector<vk::DescriptorSetLayout> layouts{};
         for (auto& index: descriptorSetIndices){
@@ -190,11 +203,24 @@ public:
         }
         pipelineLayoutInfo.setSetLayouts(layouts);
         pipelineLayoutInfo.setPushConstantRanges(vertShader_.pushConstInfos_);
+        pipelineLayoutInfo.flags = {};
 
         auto [pLResult, pipelineLayout] = device_.createPipelineLayoutUnique(pipelineLayoutInfo);
         utils::vkEnsure(pLResult);
         pipeLayout_ = std::move(pipelineLayout);
+        return pipeLayout_.get();
+    }
 
+    // Create pipeline layout with all descriptor set layouts.
+    vk::PipelineLayout createPipelineLayout(){
+        std::vector<DescSetIdx> layoutIndices{};
+        for (auto& setBind: bindings_){
+            layoutIndices.push_back(setBind.first);
+        }
+        return createPipelineLayout(layoutIndices);
+    }
+
+    vk::Pipeline createPipeline(vk::RenderPass renderPass){
         vk::GraphicsPipelineCreateInfo pipelineInfo = {};
         pipelineInfo.setStages(shaderStages_);
         pipelineInfo.pVertexInputState = &vertInputInfo_;
@@ -206,7 +232,7 @@ public:
         pipelineInfo.pColorBlendState = &blendInfo_;
         pipelineInfo.layout = pipeLayout_.get();
         pipelineInfo.renderPass = renderPass;
-        pipelineInfo.subpass = subpass;
+        pipelineInfo.subpass = subpassInfo_.index;
         pipelineInfo.basePipelineHandle = nullptr;
 
         auto [graphPipeResult, graphicsPipeline] = device_.createGraphicsPipelineUnique(nullptr, pipelineInfo);
@@ -215,15 +241,64 @@ public:
         return pipe_.get();
     }
 
-    // Create pipeline with all descriptor set layouts.
-    vk::Pipeline createPipeline(vk::RenderPass renderPass, uint32_t subpass){
-        std::vector<DescSetIdx> layoutIndices{};
-        for (auto& setBind: bindings_){
-            layoutIndices.push_back(setBind.first);
-        }
-        return createPipeline(renderPass, subpass, layoutIndices);
-    }
 private:
+    SubpassInfo setSubpassInfo() {
+        vk::SubpassDescription2 description{};
+        description.flags = {};
+        description.colorAttachmentCount = fragShader_.attachmentReferences_.colorAttachments.size();
+        description.pColorAttachments = fragShader_.attachmentReferences_.colorAttachments.data();
+        description.inputAttachmentCount = fragShader_.attachmentReferences_.inputAttachments.size();
+        description.pInputAttachments = fragShader_.attachmentReferences_.inputAttachments.data();
+        description.pResolveAttachments = fragShader_.attachmentReferences_.resolveAttachments.data();
+        description.pDepthStencilAttachment = &fragShader_.attachmentReferences_.depthStencilAttachment;
+        SubpassInfo info{};
+        info.description = description;
+        // Index for this subpass
+        info.index = 0;
+        // Dependency for this subpass. There are some degree of freedom when writing sync rules.
+        // Refer to https://github.com/KhronosGroup/Vulkan-Docs/wiki/Synchronization-Examples for inspirations.
+        info.dependencies = {};
+        {
+            // Future-proof when we have multiple renderpass per swapchain frame
+            vk::SubpassDependency2 swapchainImageBeforeRender{};
+            // ViewLocalBit when no inter-view access needed, ByRegionBit when no inter-fragment access needed.
+            swapchainImageBeforeRender.dependencyFlags = vk::DependencyFlagBits::eByRegion;//vk::DependencyFlagBits::eViewLocal|;
+            //VUID-VkSubpassDependency2-dependencyFlags-03090/03091
+            // VK_SUBPASS_EXTERNAL means anything happened before beginning renderpass scope
+            swapchainImageBeforeRender.srcSubpass = VK_SUBPASS_EXTERNAL;
+            swapchainImageBeforeRender.dstSubpass = 0;
+            // For fine-grained src and dst specification.
+            vk::MemoryBarrier2 beforeRenderBarrier{};
+            beforeRenderBarrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+            beforeRenderBarrier.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+            beforeRenderBarrier.srcAccessMask = vk::AccessFlagBits2::eNone;
+            beforeRenderBarrier.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+            vk::StructureChain<vk::SubpassDependency2, vk::MemoryBarrier2> beforeRenderDep{
+                    swapchainImageBeforeRender,
+                    beforeRenderBarrier
+            };
+            // Right now only one renderpass per swapchain frame, no need to include it.
+            //info.dependencies.push_back(beforeRenderDep);
+            // Can be redundant if the following renderpass properly wait before accessing the swapchain image.
+            // In this demonstration, the next renderpass is responsible for drawing UI and gaussian-filtering FX.
+            // The swapchain image is used as its input attachment.
+            vk::SubpassDependency2 swapchainImageAfterRender{};
+            swapchainImageAfterRender.srcSubpass = 0;
+            swapchainImageAfterRender.dstSubpass = VK_SUBPASS_EXTERNAL;
+            vk::MemoryBarrier2 afterRenderBarrier{};
+            afterRenderBarrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+            afterRenderBarrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+            afterRenderBarrier.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+            afterRenderBarrier.dstAccessMask = vk::AccessFlagBits2::eInputAttachmentRead;
+            vk::StructureChain<vk::SubpassDependency2, vk::MemoryBarrier2> afterRenderDep{
+                    swapchainImageAfterRender,
+                    afterRenderBarrier
+            };
+            // Right now only one renderpass per swapchain frame, no need to include it.
+            //info.dependencies.push_back(afterRenderDep);
+        }
+        return info;
+    }
     std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages_{};
     std::unordered_map<DescSetIdx, vk::UniqueDescriptorSetLayout> descLayout_{};
     vk::UniquePipelineLayout pipeLayout_{};

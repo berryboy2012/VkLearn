@@ -23,6 +23,8 @@
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.hpp"
 #include "utils.h"
+#include "global_objects.hpp"
+
 // The lifetime of vk::Buffer and vk::Image has some degree of freedom, we need to keep track of some information.
 struct VulkanBufferMemory{
     vk::UniqueHandle<vma::Allocation,vma::Dispatcher> mem{};
@@ -36,7 +38,7 @@ struct VulkanBufferMemory{
         *this = std::move(other);
     }
     VulkanBufferMemory& operator= (VulkanBufferMemory &&other) noexcept {
-        if (this != &other){
+        if (this != &other) [[likely]]{
             mem = std::move(other.mem);
             auxInfo = other.auxInfo;
             resource = std::move(other.resource);
@@ -45,7 +47,34 @@ struct VulkanBufferMemory{
         return *this;
     }
 };
-typedef VulkanBufferMemory VulkanPhantomBuffer;
+vk::ImageViewCreateInfo imageViewInfoBuilder(
+        vk::Image image, vk::ImageType imageType, vk::Format format, uint32_t mipLevelCount, uint32_t imgCount,
+        const vk::ImageAspectFlags imageAspect){
+    vk::ImageViewCreateInfo createInfo = {};
+    createInfo.image = image;
+    switch (imageType) {
+        case vk::ImageType::e1D:
+            createInfo.viewType = vk::ImageViewType::e1D;
+            break;
+        case vk::ImageType::e2D:
+            createInfo.viewType = vk::ImageViewType::e2D;
+            break;
+        case vk::ImageType::e3D:
+            createInfo.viewType = vk::ImageViewType::e3D;
+            break;
+    }
+    createInfo.format = format;
+    createInfo.components.r = vk::ComponentSwizzle::eIdentity;
+    createInfo.components.g = vk::ComponentSwizzle::eIdentity;
+    createInfo.components.b = vk::ComponentSwizzle::eIdentity;
+    createInfo.components.a = vk::ComponentSwizzle::eIdentity;
+    createInfo.subresourceRange.aspectMask = imageAspect;
+    createInfo.subresourceRange.baseMipLevel = 0;
+    createInfo.subresourceRange.levelCount = mipLevelCount;
+    createInfo.subresourceRange.baseArrayLayer = 0;
+    createInfo.subresourceRange.layerCount = imgCount;
+    return createInfo;
+}
 struct VulkanImageMemory{
     vk::Device device_{};
     vk::UniqueHandle<vma::Allocation,vma::Dispatcher> mem{};
@@ -61,7 +90,7 @@ struct VulkanImageMemory{
         *this = std::move(other);
     }
     VulkanImageMemory& operator= (VulkanImageMemory &&other) noexcept {
-        if (this != &other){
+        if (this != &other) [[likely]]{
             mem = std::move(other.mem);
             auxInfo = other.auxInfo;
             resource = std::move(other.resource);
@@ -71,8 +100,38 @@ struct VulkanImageMemory{
         return *this;
     }
     void createView(const vk::ImageAspectFlags imageAspect){
+        auto createInfo = imageViewInfoBuilder(
+                resource.get(),
+                resInfo.imageType, resInfo.format, resInfo.mipLevels, resInfo.arrayLayers,
+                imageAspect);
+        auto [result, imgView] = device_.createImageViewUnique(createInfo);
+        utils::vkEnsure(result);
+        view = std::move(imgView);
+    }
+};
+struct VulkanImageHandle{
+    vk::Device device_{};
+    vk::Image resource{};
+    vk::ImageCreateInfo resInfo{};
+    // vk::Image has the complication of vk::ImageView, vk::Sampler can live on its own.
+    vk::UniqueImageView view{};
+    VulkanImageHandle() = default;
+    VulkanImageHandle(const VulkanImageHandle &) = delete;
+    VulkanImageHandle& operator= (const VulkanImageHandle &) = delete;
+    VulkanImageHandle(VulkanImageHandle &&other) noexcept{
+        *this = std::move(other);
+    }
+    VulkanImageHandle& operator= (VulkanImageHandle &&other) noexcept {
+        if (this != &other) [[likely]]{
+            resource = other.resource;
+            resInfo = other.resInfo;
+            view = std::move(other.view);
+        }
+        return *this;
+    }
+    void createView(const vk::ImageAspectFlags imageAspect){
         vk::ImageViewCreateInfo createInfo = {};
-        createInfo.image = resource.get();
+        createInfo.image = resource;
         switch (resInfo.imageType) {
             case vk::ImageType::e1D:
                 createInfo.viewType = vk::ImageViewType::e1D;
@@ -99,7 +158,6 @@ struct VulkanImageMemory{
         view = std::move(imgView);
     }
 };
-typedef VulkanImageMemory VulkanPhantomImage;
 class VulkanResourceManager{
     // A thin layer on top of VMA. Along with some helper function for creating usable vk::Buffer and vk::Image etc.
     //  You still need to manage the lifetime of resources by yourself.
@@ -111,7 +169,7 @@ public:
         *this = std::move(other);
     }
     VulkanResourceManager& operator= (VulkanResourceManager &&other) noexcept {
-        if (this != &other){
+        if (this != &other) [[likely]]{
             inst_ = other.inst_;
             physDev_ = other.physDev_;
             device_ = other.device_;
@@ -124,13 +182,20 @@ public:
     }
     VulkanResourceManager() = default;
     VulkanResourceManager(vk::Instance instance, vk::PhysicalDevice physicalDevice, vk::Device device,
-                          utils::QueueStruct queueCGTP) {
+                          utils::QueueStruct queueCGTP, bool isThreaded = true) {
         inst_ = instance;
         physDev_ = physicalDevice;
         device_ = device;
         queueIdxCGTP_ = queueCGTP.queueFamilyIdx;
         queue_ = queueCGTP.queue;
-        auto funcs = vma::functionsFromDispatcher(VULKAN_HPP_DEFAULT_DISPATCHER);
+        auto funcs = vma::VulkanFunctions{};//
+        if (isThreaded){
+            std::lock_guard<std::mutex> lock(vulkanMutex);
+            funcs = vma::functionsFromDispatcher(VULKAN_HPP_DEFAULT_DISPATCHER);
+        }
+        else{
+            funcs = vma::functionsFromDispatcher(VULKAN_HPP_DEFAULT_DISPATCHER);
+        }
         vma::AllocatorCreateInfo allocatorCreateInfo = {};
         allocatorCreateInfo.flags = vma::AllocatorCreateFlagBits::eBufferDeviceAddress;
         allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
@@ -160,7 +225,7 @@ public:
         allocInfo.usage = vmaMemUsage;
         allocInfo.requiredFlags = memProps;
         vma::AllocationInfo auxInfo{};
-        auto [result, buffer] = alloc_->createBufferUnique(bufferInfo, allocInfo, &auxInfo);
+        auto [result, buffer] = allocator_.createBufferUnique(bufferInfo, allocInfo, &auxInfo);
         utils::vkEnsure(result);
         VulkanBufferMemory createdBuf{};
         createdBuf.resource = std::move(buffer.first);
@@ -196,7 +261,7 @@ public:
         allocInfo.usage = vmaMemUsage;
         allocInfo.requiredFlags = memProps;
         vma::AllocationInfo auxInfo{};
-        auto [result, image] = alloc_->createImageUnique(imageInfo, allocInfo, &auxInfo);
+        auto [result, image] = allocator_.createImageUnique(imageInfo, allocInfo, &auxInfo);
         utils::vkEnsure(result);
         VulkanImageMemory createdImg{};
         createdImg.resource = std::move(image.first);
@@ -304,6 +369,24 @@ public:
                               vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
         return std::move(finalImage);
     }
+    VulkanResourceManager getManagerHandle(){
+        auto handle = VulkanResourceManager{};
+        handle.allocator_ = allocator_;
+        handle.inst_ = inst_;
+        handle.physDev_ = physDev_;
+        handle.device_ = device_;
+        handle.alloc_.reset();
+        handle.queueIdxCGTP_ = {};
+        handle.queue_ = VK_NULL_HANDLE;
+        handle.resCmdPool_ = {};
+        return handle;
+    }
+    void setupManagerHandle(utils::QueueStruct queueCGTP){
+        assert(!alloc_.has_value());
+        queueIdxCGTP_ = queueCGTP.queueFamilyIdx;
+        queue_ = queueCGTP.queue;
+        resCmdPool_ = CommandBufferManager{device_, {.queue = queue_, .queueFamilyIdx = queueIdxCGTP_}};
+    }
 
 private:
     static std::tuple<
@@ -346,7 +429,7 @@ private:
     vk::Instance inst_{};
     vk::PhysicalDevice physDev_{};
     vk::Device device_{};
-    vma::UniqueAllocator alloc_{};
+    std::optional<vma::UniqueAllocator> alloc_{};
     uint32_t queueIdxCGTP_{};
     vk::Queue queue_{};
     CommandBufferManager resCmdPool_{};

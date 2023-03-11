@@ -59,8 +59,8 @@ namespace utils {
             {spirv_cross::SPIRType::BaseType::Float, 4},
             {spirv_cross::SPIRType::BaseType::Double, 8},
             {spirv_cross::SPIRType::BaseType::Struct, 0},
-            //{spirv_cross::SPIRType::BaseType::Image, 0},
-            //{spirv_cross::SPIRType::BaseType::SampledImage, 0},
+            {spirv_cross::SPIRType::BaseType::Image, 0},
+            {spirv_cross::SPIRType::BaseType::SampledImage, 0},
             //{spirv_cross::SPIRType::BaseType::Sampler, 0},
             //{spirv_cross::SPIRType::BaseType::AccelerationStructure, 0},
             //{spirv_cross::SPIRType::BaseType::RayQuery, 0}
@@ -245,7 +245,14 @@ namespace utils {
         for (auto &sampler : resources.sampled_images){
             unsigned set = glsl.get_decoration(sampler.id, spv::DecorationDescriptorSet);
             unsigned binding = glsl.get_decoration(sampler.id, spv::DecorationBinding);
-            std::cout<<std::format("Combined image sampler: {} at set = {}, binding = {}.\n", sampler.name, set, binding);
+            std::cout<<std::format("Combined image sampler: {} at set = {}, binding = {}.\t", sampler.name, set, binding);
+            auto varTypeId = glsl.get_type(sampler.type_id);
+            if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::SampledImage){
+                if (varTypeId.image.ms){
+                    std::cout<<std::format("Is MSAA resolve image.\n");
+                }
+            }
+            std::cout<<"\n";
         }
         {
             size_t offset{0};
@@ -274,6 +281,26 @@ namespace utils {
                 auto binding = glsl.get_decoration(pushConst.id, spv::DecorationBinding);
                 std::cout << std::format("Push constant: {} at set = {}, binding = {};\t", pushConst.name, set, binding);
                 auto varTypeId = glsl.get_type(pushConst.type_id);
+                auto size = varTypeId.vecsize * varTypeId.columns;
+                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
+                    size *= glsl.get_declared_struct_size(varTypeId);
+                } else{
+                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
+                }
+                std::cout << std::format("Size = {} B, base type is {}.\n", size,
+                                         spirvTypeNameMap.at(varTypeId.basetype));
+                probeLayout(glsl, varTypeId, offset, varSize);
+            }
+        }
+        {
+            size_t offset{0};
+            size_t varSize{0};
+            for (auto &subInput: resources.subpass_inputs) {
+                auto set = glsl.get_decoration(subInput.id, spv::DecorationDescriptorSet);
+                auto binding = glsl.get_decoration(subInput.id, spv::DecorationBinding);
+                auto attach = glsl.get_decoration(subInput.id, spv::DecorationInputAttachmentIndex);
+                std::cout << std::format("Subpass input: {} at set = {}, input_attachment_index = {}, binding = {};\t", subInput.name, set, attach, binding);
+                auto varTypeId = glsl.get_type(subInput.type_id);
                 auto size = varTypeId.vecsize * varTypeId.columns;
                 if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
                     size *= glsl.get_declared_struct_size(varTypeId);

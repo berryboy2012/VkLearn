@@ -44,6 +44,7 @@ include(cmake/AddTexture.cmake)
 add_shader(VkLearn shader.vert)
 add_shader(VkLearn shader.frag)
 add_shader(VkLearn testAttr.vert)
+add_shader(VkLearn testAttr.frag)
 
 add_texture(VkLearn test_512.png)
 

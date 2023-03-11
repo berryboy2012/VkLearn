@@ -15,7 +15,7 @@ public:
         device_ = device;
     }
     DescriptorManager& operator= (DescriptorManager &&other) noexcept{
-        if (this != &other){
+        if (this != &other) [[likely]]{
             device_ = other.device_;
             layoutSizes_ = other.layoutSizes_;
             numDescLayouts_ = other.numDescLayouts_;

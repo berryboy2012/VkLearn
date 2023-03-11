@@ -118,6 +118,7 @@ vk::UniqueDescriptorPool createDescriptorPool(vk::Device &device, const uint32_t
 std::tuple<vk::UniqueDescriptorSetLayout, vk::UniquePipelineLayout, vk::UniquePipeline>
 createGraphicsPipeline(vk::Device &device, vk::Extent2D &viewportExtent, vk::RenderPass &renderPass) {
     auto testShaderModule = utils::createShaderModule("shaders/testAttr.vert.spv", device);
+    auto testFragShaderModule = utils::createShaderModule("shaders/testAttr.frag.spv", device);
     auto vertShader = VertexShader{device}; // shaders/shader.vert
     auto fragShader = FragShader{device}; // shaders/shader.frag
 
@@ -640,7 +641,7 @@ namespace render {
         TextureObject(const TextureObject &) = delete;
         TextureObject& operator= (const TextureObject &) = delete;
         TextureObject& operator= (TextureObject &&other) noexcept {
-            if (this != &other){
+            if (this != &other) [[likely]]{
                 sampler = std::move(other.sampler);
                 image = std::move(other.image);
                 imageLayout = other.imageLayout;

@@ -82,7 +82,8 @@ For execution, Vulkan has renderpass:
       - Fragment shader
       - Descriptor set: Tell pipeline how to bind arguments with custom parameters in the programmable shaders
       - ...
-  - Attachment: Description set but for the fixed-function stages
+  - Attachment: Descriptor but for the fixed-function stages
+  - Framebuffer: Descriptor set but for the fixed-function stages
 
 For other workloads (compute and ray-tracing for example), it might be unnecessary to have an equivalent concept of 
 renderpass etc. They may only have concepts for pipeline and things below. 
