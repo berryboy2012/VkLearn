@@ -32,6 +32,9 @@ class VertexShader{
 public:
     vk::UniqueShaderModule shaderModule_;
     typedef size_t DescSetIdx;
+    typedef uint32_t BindIdx;
+    //TODO: Add proper resId to connect with handles in the resource part
+    std::unordered_map<DescSetIdx, std::unordered_map<std::string, BindIdx>> descResLUT_{};
     std::unordered_map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> descLayouts_{};
     // Specific to vertex shaders
     std::vector<vk::VertexInputBindingDescription> inputInfos_{};
@@ -48,6 +51,7 @@ public:
     VertexShader& operator= (VertexShader &&other) noexcept {
         if (this != &other) [[likely]]{
             shaderModule_ = std::move(other.shaderModule_);
+            descResLUT_ = other.descResLUT_;
             descLayouts_ = other.descLayouts_;
             inputInfos_ = other.inputInfos_;
             attrInfos_ = other.attrInfos_;
@@ -72,6 +76,7 @@ public:
             modelUBOInfo.pImmutableSamplers = nullptr;
             modelUBOInfo.stageFlags = vk::ShaderStageFlagBits::eVertex;
             descLayouts_[setIndex].push_back(modelUBOInfo);
+            descResLUT_[setIndex]["modelUBO"] = descLayouts_[setIndex].rbegin()->binding;
         }
         // vertex inputs info
         {
@@ -127,10 +132,11 @@ struct AttachmentInfo{
     vk::Format format{};
     vk::ImageCreateFlags flags{};
     vk::ImageUsageFlags usage{};
+    // image only
     vk::ImageTiling tiling{};
     vk::ImageLayout layout{};
     vma::AllocationCreateFlags vmaFlag{};
-    // image view
+    // image view only
     vk::ImageAspectFlags aspect{};
     // TODO: Corresponding ID in resource manager
     std::string resId{};
@@ -140,6 +146,8 @@ public:
     vk::UniqueShaderModule shaderModule_;
     typedef size_t DescSetIdx;
     typedef size_t AttachIdx;
+    typedef uint32_t BindIdx;
+    std::unordered_map<DescSetIdx, std::unordered_map<std::string, BindIdx>> descResLUT_{};
     std::unordered_map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> descLayouts_{};
     // Mandatory for fragment shaders
     std::unordered_map<AttachIdx, AttachmentInfo> attachmentResourceInfos_{};
@@ -155,6 +163,7 @@ public:
     FragShader& operator= (FragShader &&other) noexcept {
         if (this != &other) [[likely]]{
             shaderModule_ = std::move(other.shaderModule_);
+            descResLUT_ = other.descResLUT_;
             descLayouts_ = other.descLayouts_;
             device_ = other.device_;
             attachmentResourceInfos_ = other.attachmentResourceInfos_;
@@ -176,6 +185,7 @@ public:
             texSamplerInfo.pImmutableSamplers = nullptr;
             texSamplerInfo.stageFlags = vk::ShaderStageFlagBits::eFragment;
             descLayouts_[setIndex].push_back(texSamplerInfo);
+            descResLUT_[setIndex]["texSampler"] = descLayouts_[setIndex].rbegin()->binding;
         }
         // filling attachment info, only need to provide attachments first used by this shader
         {
@@ -199,6 +209,7 @@ public:
             swapchainImageAttachmentInfo.vmaFlag = {};
             // Image view info are not needed as well
             swapchainImageAttachmentInfo.aspect = vk::ImageAspectFlagBits::eColor;
+            swapchainImageAttachmentInfo.resId = "swapchainIMG";
             attachmentResourceInfos_[attachIndex] = swapchainImageAttachmentInfo;
         }
         {
@@ -222,6 +233,7 @@ public:
             depthImageAttachmentInfo.vmaFlag = {};
             // Image view info are needed
             depthImageAttachmentInfo.aspect = vk::ImageAspectFlagBits::eDepth;
+            depthImageAttachmentInfo.resId = "depthIMG";
             attachmentResourceInfos_[attachIndex] = depthImageAttachmentInfo;
         }
         // filling attachment references

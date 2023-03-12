@@ -50,6 +50,9 @@ public:
 
     // Info needed to build descriptor set
     typedef size_t DescSetIdx;
+    typedef uint32_t BindIdx;
+    //TODO: Add proper resId to connect with handles in the resource part
+    std::unordered_map<DescSetIdx, std::unordered_map<std::string, BindIdx>> descResLUT_{};
     std::unordered_map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> bindings_{};
 
     // Info about sync between subpasses
@@ -101,6 +104,7 @@ public:
             colorInfos_ = other.colorInfos_;
             blendInfo_ = setColorBlendStateInfo(colorInfos_);
             shaderStages_ = other.shaderStages_;
+            descResLUT_ = other.descResLUT_;
             bindings_ = other.bindings_;
             subpassInfo_ = setSubpassInfo();
             descLayout_ = std::move(other.descLayout_);
@@ -167,6 +171,19 @@ public:
         blendInfo_ = setColorBlendStateInfo(colorInfos_);
 
         {
+            for (auto &descResSet: vertShader_.descResLUT_) {
+                for (auto &descResBind: descResSet.second){
+                    descResLUT_[descResSet.first][descResBind.first] = descResBind.second;
+                }
+            }
+            for (auto &descResSet: fragShader_.descResLUT_) {
+                for (auto &descResBind: descResSet.second){
+                    descResLUT_[descResSet.first][descResBind.first] = descResBind.second;
+                }
+            }
+        }
+
+        {
             for (auto &bindSet: vertShader_.descLayouts_) {
                 for (auto &bind: bindSet.second){
                     bindings_[bindSet.first].push_back(bind);
@@ -185,6 +202,14 @@ public:
         // Maybe it is not a good time to create vk::PipelineLayout object right now, since descriptor set are not trivial to manage.
 
         // We cannot create vk::Pipeline object for now. Since renderpass and subpass are higher-level concepts.
+    }
+    vk::DescriptorSetLayoutBinding queryDescriptorSetLayoutBinding(DescSetIdx set, const std::string &resId){
+        auto bindingIndex = descResLUT_.at(set).at(resId);
+        for (const auto& binding:bindings_.at(set)){
+            if (binding.binding == bindingIndex){
+                return binding;
+            }
+        }
     }
 
     vk::DescriptorSetLayout getDescriptorLayout(DescSetIdx index){

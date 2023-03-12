@@ -210,7 +210,7 @@ public:
     }
     VulkanBufferMemory createBuffernMemory(
             const vk::DeviceSize bufferSize, const vk::BufferUsageFlags bufferUsage,
-            const vma::AllocationCreateFlags vmaFlag, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto){
+            const vma::AllocationCreateFlags vmaFlag = {}, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto){
 
         auto bufferInfo = vk::BufferCreateInfo{};
         bufferInfo.flags = vk::BufferCreateFlags{};
@@ -239,7 +239,7 @@ public:
     VulkanImageMemory createImagenMemory(
             const vk::Extent3D extent, const vk::Format format, const vk::ImageTiling tiling,
             const vk::ImageLayout layout, const vk::ImageUsageFlags imageUsage,
-            const vma::AllocationCreateFlags vmaFlag, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto){
+            const vma::AllocationCreateFlags vmaFlag = {}, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto){
 
         auto imageInfo = vk::ImageCreateInfo{};
         imageInfo.flags = vk::ImageCreateFlags{};
@@ -271,6 +271,13 @@ public:
         createdImg.resInfo.queueFamilyIndexCount = 0;
         createdImg.resInfo.pQueueFamilyIndices = nullptr;
         return std::move(createdImg);
+    }
+    VulkanImageMemory createImagenMemory(
+            const vk::Extent2D extent2D, const vk::Format format, const vk::ImageTiling tiling,
+            const vk::ImageLayout layout, const vk::ImageUsageFlags imageUsage,
+            const vma::AllocationCreateFlags vmaFlag = {}, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto){
+        vk::Extent3D extent{extent2D, 1};
+        return createImagenMemory(extent, format, tiling, layout, imageUsage, vmaFlag, memProps, vmaMemUsage);
     }
     VulkanBufferMemory createStagingBuffer(const vk::DeviceSize bufferSize){
         using VmaFlagE = vma::AllocationCreateFlagBits;
@@ -321,7 +328,7 @@ public:
     VulkanBufferMemory createBuffernMemoryFromHostData(
             const std::span<const HostElementType> hostData,
             const vk::BufferUsageFlags bufferUsage,
-            const vma::AllocationCreateFlags vmaFlag, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto) {
+            const vma::AllocationCreateFlags vmaFlag = {}, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto) {
         using BufUsage = vk::BufferUsageFlagBits;
         vk::DeviceSize bufferSize = hostData.size_bytes();
         auto stagingBuffer = createStagingBuffer(bufferSize);
@@ -351,13 +358,32 @@ public:
             singleTime.coBuf.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
         }
     }
+    vk::UniqueSampler createTextureSampler() {
+        auto properties = physDev_.getProperties();
+        vk::SamplerCreateInfo samplerInfo{};
+        samplerInfo.magFilter = vk::Filter::eLinear;
+        samplerInfo.minFilter = vk::Filter::eLinear;
+        samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+        samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+        samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+        samplerInfo.anisotropyEnable = VK_TRUE;
+        samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+        samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+        samplerInfo.unnormalizedCoordinates = VK_FALSE;
+        samplerInfo.compareEnable = VK_FALSE;
+        samplerInfo.compareOp = vk::CompareOp::eAlways;
+        samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+        auto [result, sampler] = device_.createSamplerUnique(samplerInfo);
+        utils::vkEnsure(result);
+        return std::move(sampler);
+    }
 
     template<class HostElementType>
     VulkanImageMemory createImagenMemoryFromHostData(
             const std::span<const HostElementType> hostData,
             const vk::Extent3D extent, const vk::Format format, const vk::ImageTiling tiling,
             const vk::ImageLayout layout, const vk::ImageUsageFlags imageUsage,
-            const vma::AllocationCreateFlags vmaFlag, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto) {
+            const vma::AllocationCreateFlags vmaFlag = {}, const vk::MemoryPropertyFlags memProps = {}, const vma::MemoryUsage vmaMemUsage = vma::MemoryUsage::eAuto) {
         using ImgUsage = vk::ImageUsageFlagBits;
         vk::DeviceSize bufferSize = hostData.size_bytes();
         auto stagingBuffer = createStagingBuffer(bufferSize);

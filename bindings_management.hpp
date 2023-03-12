@@ -80,6 +80,16 @@ public:
         return std::move(descriptorSets);
     }
 
+    vk::UniqueDescriptorSet createDescriptorSet(const vk::DescriptorSetLayout &layout){
+        vk::DescriptorSetAllocateInfo allocInfo{};
+        allocInfo.descriptorPool = pool_.get();
+        allocInfo.setSetLayouts(layout);
+
+        auto [result, descriptorSets] = device_.allocateDescriptorSetsUnique(allocInfo);
+        utils::vkEnsure(result);
+        return std::move(descriptorSets[0]);
+    }
+
     void updateDescriptorSet(vk::DescriptorSet descriptorSet,
                              vk::Sampler sampler, vk::ImageView view, vk::ImageLayout layout,
                              const vk::DescriptorSetLayoutBinding &bindInfo, uint32_t bindOffset, uint32_t numElements){

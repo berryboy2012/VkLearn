@@ -54,6 +54,10 @@ The rest are trivial stuffs.
  scratching head.~~
 - ~~Image, image view and sampler. (Use textures in fragment shader)~~
 - ~~Depth buffering. (Tell GPU which one of the overlapping fragments should be drawn)~~
+- When should we create static global resources?
+  - ~~Before spawning renderer threads: Can't do lazy loading.~~
+  - ~~Inside renderer threads: Duplicated resources.~~
+  - Yet another thread, dedicated to global resource allocation: Might be hard to manage concurrency.
 - Add basic ray-tracing pipeline.
 - Add shadow map pipeline.
 - Refactoring the code (with the help of VMA), so we don't lose our sanity when using Vulkan. 

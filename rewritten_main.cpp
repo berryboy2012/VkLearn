@@ -47,6 +47,7 @@ struct PhysicalDeviceInfo{
 #include "renderpass.hpp"
 #include "commands_management.h"
 #include "memory_management.hpp"
+#include "resource_management.hpp"
 void queryOVR(){
     vr::EVRInitError eError = vr::VRInitError_None;
     auto m_pHMD = vr::VR_Init( &eError, vr::VRApplication_Utility );
@@ -632,7 +633,7 @@ int main(int argc, char *argv[]) {
 {
     // Things provided by main thread at start
     auto inflightIndex = size_t{0};
-    auto inst = instance.get(); auto physDev = chosenPhysicalDevice; auto renderDev = device.get();
+    auto inst = instance.get(); auto physDev = chosenPhysicalDevice; auto devProps = physicalDeviceProps; auto renderDev = device.get();
     auto renderQueue = utils::QueueStruct{.queue = renderDev.getQueue(queueFamilyIndex, inflightIndex), .queueFamilyIdx = queueFamilyIndex};
     auto resMgr = globalResMgr.getManagerHandle();
     auto renderExtent = surfaceExtent; auto viewport = getViewportInfo(renderExtent.width, renderExtent.height); auto renderDepthFmt = depthFormat;
@@ -697,33 +698,77 @@ int main(int argc, char *argv[]) {
     renderpassMgr.createRenderpass();
     // Must create renderpass object before creating framebuffer
     auto frameBuffer = renderpassMgr.createFramebuffer(renderExtent);
+    graphPipe.createPipeline(renderpassMgr.renderpass_);
 
     // here we just hard-code everything
-    /*Create attachment requested resources
+    /*TODO: Create attachment requested resources
      * Loop over attachments:
      *   Inspect info to determine whether the vk::ImageView object needs to be created by us
      *   If we need to create vk::ImageView, check whether we need to create vk::Image as well ()
      * */
 
-    for (const auto& attach: renderpassMgr.attachDescs_){
-        if (attach.second.description.finalLayout == vk::ImageLayout::ePresentSrcKHR){
-            // don't need to create imageview for swapchain image
-            continue;
-        }
-        if ((attach.second.usage & vk::ImageUsageFlagBits::eTransientAttachment) == vk::ImageUsageFlagBits::eTransientAttachment){
-            // it's transient attachment, only lazily allocated resources required.
-            continue;
-        }
-        if (attach.second.description.initialLayout == vk::ImageLayout::eUndefined){
-            // it's output image, no need to transfer data from host.
-            continue;
-        }
-        if (attach.second.description.finalLayout == vk::ImageLayout::eDepthAttachmentOptimal){
-            // it's depth image, no need to transfer data from host.
-            continue;
-        }
-    }
+    auto depthImgRes = resMgr.createImagenMemory(
+            renderExtent, depthFormat, vk::ImageTiling::eOptimal, vk::ImageLayout::eDepthAttachmentOptimal,
+            vk::ImageUsageFlagBits::eDepthStencilAttachment);
+    depthImgRes.createView(vk::ImageAspectFlagBits::eDepth);
 
+//    for (const auto& attach: renderpassMgr.attachDescs_){
+//        if (attach.second.description.finalLayout == vk::ImageLayout::ePresentSrcKHR){
+//            // don't need to create imageview for swapchain image
+//            continue;
+//        }
+//        if ((attach.second.usage & vk::ImageUsageFlagBits::eTransientAttachment) == vk::ImageUsageFlagBits::eTransientAttachment){
+//            // it's transient attachment, only lazily allocated resources required.
+//            continue;
+//        }
+//        if (attach.second.description.initialLayout == vk::ImageLayout::eUndefined){
+//            // it's output image, no need to transfer data from host.
+//            continue;
+//        }
+//        if (attach.second.description.finalLayout == vk::ImageLayout::eDepthAttachmentOptimal){
+//            // it's depth image, no need to transfer data from host.
+//            continue;
+//        }
+//        // For rest of attachment, we can't infer its resource requirements from
+//    }
+
+    // Hard-code everything, also duplicate global static resources
+    /* TODO: Create descriptor requested resources
+     *  Loop over descriptor sets
+     *   Loop over each descriptor
+     * */
+    // Right now there are three resources:
+    //  A texture: Load data from disk, create memory, image, transfer data to device, create image view, sampler
+    //  A uniform buffer for sending in model matrix: Create memory, buffer
+    //  An accelerate structure: Get handles of scene geometry, create memory interactively for BLAS, build BLAS,
+    //   create memory interactively for TLAS, build TLAS. A testament of the flexibility of our resource management scheme
+
+    // First create descriptor pool, as all required descriptor sets are registered now
+
+    descMgr.createDescriptorPool(2);
+
+    // Allocate resources, TODO: Add AccelStruct
+    auto testTexture = TextureObject{"textures/test_512.png", resMgr};
+
+    auto modelUBO = resMgr.createBuffernMemory(
+            sizeof(ModelUBO),
+            vk::BufferUsageFlagBits::eUniformBuffer,
+            vma::AllocationCreateFlagBits::eHostAccessSequentialWrite|vma::AllocationCreateFlagBits::eMapped);
+    // Create descriptor sets for each subpass's pipeline inside a renderpass
+
+    auto descriptorSet = descMgr.createDescriptorSet(graphPipe.getDescriptorLayout(0));
+    auto testTextureBind = graphPipe.queryDescriptorSetLayoutBinding(0, "texSampler");
+    descMgr.updateDescriptorSet(descriptorSet.get(), testTexture.sampler_.get(), testTexture.view_, testTexture.imageLayout_, testTextureBind, 0, 1);
+    auto modelUBOBind = graphPipe.queryDescriptorSetLayoutBinding(0, "modelUBO");
+    descMgr.updateDescriptorSet(descriptorSet.get(), modelUBO.resource.get(), 0, modelUBO.resInfo.size, modelUBOBind, 0, 1);
+
+    // Lastly, create other resources required by the renderpass
+    auto modelVertInputHost = model_info::vertices;
+    auto modelVertInputDevice = resMgr.createBuffernMemoryFromHostData<model_info::PCTVertex>(modelVertInputHost, vk::BufferUsageFlagBits::eVertexBuffer);
+    auto modelVertIdxHost = model_info::vertexIdx;
+    auto modelVertIdxDevice = resMgr.createBuffernMemoryFromHostData<model_info::VertIdxType>(modelVertIdxHost, vk::BufferUsageFlagBits::eIndexBuffer);
+    auto sceneVP = ScenePushConstants{};
+    
 }
 }
 

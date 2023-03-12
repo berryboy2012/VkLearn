@@ -26,7 +26,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(OpenVR REQUIRED)
 
 set(HEADERS_SRC "${CMAKE_CURRENT_LIST_DIR}/include")
-add_executable(VkLearn main.cpp renderer.hpp model_data.hpp shader_modules.hpp graphics_pipeline.hpp renderpass.hpp bindings_management.hpp memory_management.hpp)# rewritten_main.cpp)
+add_executable(VkLearn main.cpp renderer.hpp model_data.hpp shader_modules.hpp graphics_pipeline.hpp renderpass.hpp bindings_management.hpp memory_management.hpp global_objects.hpp rewritten_main.cpp resource_management.hpp)
 target_include_directories(VkLearn PRIVATE ${HEADERS_SRC})
 target_include_directories(VkLearn PRIVATE ${Stb_INCLUDE_DIR})
 target_include_directories(VkLearn PRIVATE ${SPIRV-Cross_SOURCE_DIR})
