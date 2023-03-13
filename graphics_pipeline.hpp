@@ -29,6 +29,9 @@ ViewportInfo getViewportInfo(uint32_t width, uint32_t height){
 template<class VS, class FS>
 class GraphicsPipeline{
 public:
+    vk::PipelineLayout pipelineLayout_{};
+    vk::Pipeline pipeline_{};
+
     VS vertShader_;
     FS fragShader_;
 
@@ -109,7 +112,9 @@ public:
             subpassInfo_ = setSubpassInfo();
             descLayout_ = std::move(other.descLayout_);
             pipeLayout_ = std::move(other.pipeLayout_);
+            pipelineLayout_ = pipeLayout_.get();
             pipe_ = std::move(other.pipe_);
+            pipeline_ = pipe_.get();
         }
         return *this;
     }
@@ -197,7 +202,7 @@ public:
         }
 
         // filling subpass info, only need to fill the dependencies that this pipeline is waiting for
-        setSubpassInfo();
+        subpassInfo_ = setSubpassInfo();
 
         // Maybe it is not a good time to create vk::PipelineLayout object right now, since descriptor set are not trivial to manage.
 
@@ -210,6 +215,7 @@ public:
                 return binding;
             }
         }
+        std::abort();
     }
 
     vk::DescriptorSetLayout getDescriptorLayout(DescSetIdx index){
@@ -233,7 +239,8 @@ public:
         auto [pLResult, pipelineLayout] = device_.createPipelineLayoutUnique(pipelineLayoutInfo);
         utils::vkEnsure(pLResult);
         pipeLayout_ = std::move(pipelineLayout);
-        return pipeLayout_.get();
+        pipelineLayout_ = pipeLayout_.get();
+        return pipelineLayout_;
     }
 
     // Create pipeline layout with all descriptor set layouts.
@@ -263,7 +270,8 @@ public:
         auto [graphPipeResult, graphicsPipeline] = device_.createGraphicsPipelineUnique(nullptr, pipelineInfo);
         utils::vkEnsure(graphPipeResult);
         pipe_ = std::move(graphicsPipeline);
-        return pipe_.get();
+        pipeline_ = pipe_.get();
+        return pipeline_;
     }
 
 private:
@@ -304,6 +312,7 @@ private:
             };
             // Right now only one renderpass per swapchain frame, no need to include it.
             //info.dependencies.push_back(beforeRenderDep);
+
             // Can be redundant if the following renderpass properly wait before accessing the swapchain image.
             // In this demonstration, the next renderpass is responsible for drawing UI and gaussian-filtering FX.
             // The swapchain image is used as its input attachment.
@@ -312,9 +321,9 @@ private:
             swapchainImageAfterRender.dstSubpass = VK_SUBPASS_EXTERNAL;
             vk::MemoryBarrier2 afterRenderBarrier{};
             afterRenderBarrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-            afterRenderBarrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+            afterRenderBarrier.dstStageMask = vk::PipelineStageFlagBits2::eAllTransfer|vk::PipelineStageFlagBits2::eColorAttachmentOutput;
             afterRenderBarrier.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-            afterRenderBarrier.dstAccessMask = vk::AccessFlagBits2::eInputAttachmentRead;
+            afterRenderBarrier.dstAccessMask = vk::AccessFlagBits2::eNone;
             vk::StructureChain<vk::SubpassDependency2, vk::MemoryBarrier2> afterRenderDep{
                     swapchainImageAfterRender,
                     afterRenderBarrier

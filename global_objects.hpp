@@ -45,4 +45,9 @@ void initializeMainSyncObjs(){
         syncObj.swapchainInvalid.store(false);
     }
 }
+void notifyRendererExit(){
+    for (auto& syncObj: mainRendererComms){
+        syncObj.swapchainInvalid.store(true);
+    }
+}
 #endif //VKLEARN_GLOBAL_OBJECTS_HPP

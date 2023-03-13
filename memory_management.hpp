@@ -18,9 +18,6 @@
 #include <functional>
 #include <iostream>
 
-#define VMA_STATIC_VULKAN_FUNCTIONS 0
-#define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
-#define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.hpp"
 #include "utils.h"
 #include "global_objects.hpp"
@@ -91,6 +88,7 @@ struct VulkanImageMemory{
     }
     VulkanImageMemory& operator= (VulkanImageMemory &&other) noexcept {
         if (this != &other) [[likely]]{
+            device_ = other.device_;
             mem = std::move(other.mem);
             auxInfo = other.auxInfo;
             resource = std::move(other.resource);
@@ -123,6 +121,7 @@ struct VulkanImageHandle{
     }
     VulkanImageHandle& operator= (VulkanImageHandle &&other) noexcept {
         if (this != &other) [[likely]]{
+            device_ = other.device_;
             resource = other.resource;
             resInfo = other.resInfo;
             view = std::move(other.view);
@@ -206,6 +205,7 @@ public:
         auto [result, alloc] = vma::createAllocatorUnique(allocatorCreateInfo);
         utils::vkEnsure(result);
         alloc_ = std::move(alloc);
+        allocator_ = alloc_->get();
         resCmdPool_ = CommandBufferManager{device_, {.queue = queue_, .queueFamilyIdx = queueIdxCGTP_}};
     }
     VulkanBufferMemory createBuffernMemory(
@@ -264,6 +264,7 @@ public:
         auto [result, image] = allocator_.createImageUnique(imageInfo, allocInfo, &auxInfo);
         utils::vkEnsure(result);
         VulkanImageMemory createdImg{};
+        createdImg.device_ = device_;
         createdImg.resource = std::move(image.first);
         createdImg.mem = std::move(image.second);
         createdImg.auxInfo = auxInfo;
@@ -390,7 +391,7 @@ public:
         std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
         auto finalImage = createImagenMemory(extent, format, tiling, layout, imageUsage|ImgUsage::eTransferDst, vmaFlag, memProps, vmaMemUsage);
         transitionImageLayout(finalImage.resource.get(), format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-        copyImageFromBuffer(stagingBuffer.resource.get(), finalImage.resource.get(), bufferSize, resCmdPool_);
+        copyImageFromBuffer(stagingBuffer.resource.get(), finalImage.resource.get(), extent, resCmdPool_);
         transitionImageLayout(finalImage.resource.get(), format,
                               vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
         return std::move(finalImage);

@@ -200,12 +200,13 @@ public:
             swapchainImageAttachmentInfo.description.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
             swapchainImageAttachmentInfo.description.initialLayout = vk::ImageLayout::eUndefined;
             swapchainImageAttachmentInfo.description.finalLayout = vk::ImageLayout::ePresentSrcKHR;
-            // For swapchain images, we don't need image info
+            // For swapchain images, we need some image info for framebuffer creation
             swapchainImageAttachmentInfo.flags = {};
-            swapchainImageAttachmentInfo.usage = {};
+            // Required by VK_KHR_imageless_framebuffer if this is the swapchain Image
+            swapchainImageAttachmentInfo.usage = vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eColorAttachment;
             swapchainImageAttachmentInfo.format = {};
-            swapchainImageAttachmentInfo.tiling = {};
-            swapchainImageAttachmentInfo.layout = {};
+            swapchainImageAttachmentInfo.tiling = vk::ImageTiling::eOptimal;
+            swapchainImageAttachmentInfo.layout = vk::ImageLayout::ePresentSrcKHR;
             swapchainImageAttachmentInfo.vmaFlag = {};
             // Image view info are not needed as well
             swapchainImageAttachmentInfo.aspect = vk::ImageAspectFlagBits::eColor;

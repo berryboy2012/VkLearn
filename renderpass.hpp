@@ -6,6 +6,7 @@
 #define VKLEARN_RENDERPASS_HPP
 
 #include "shader_modules.hpp"
+#include "graphics_pipeline.hpp"
 
 class Renderpass{
     //TODO: support pNext for related Vulkan info structs.
@@ -64,11 +65,15 @@ public:
         for (const auto& inputRef: inputRefs){
             subRefs.inputAttachments.push_back(inputRef);
         }
-        // Must have the same number of resolve attachments as color attachments
-        auto resolveRefs = std::span<const vk::AttachmentReference2>{
-                subpassDesc.description.pResolveAttachments, subpassDesc.description.colorAttachmentCount};
-        for (const auto& resolveRef: resolveRefs){
-            subRefs.resolveAttachments.push_back(resolveRef);
+        // The Vulkan spec is doing some surprising things
+        if (subpassDesc.description.pResolveAttachments != nullptr){
+            auto resolveRefs = std::span<const vk::AttachmentReference2>{
+                    subpassDesc.description.pResolveAttachments, subpassDesc.description.colorAttachmentCount};
+            for (const auto& resolveRef: resolveRefs){
+                subRefs.resolveAttachments.push_back(resolveRef);
+            }
+        } else {
+            subRefs.resolveAttachments = {};
         }
         auto colorRefs = std::span<const vk::AttachmentReference2>{
                 subpassDesc.description.pColorAttachments, subpassDesc.description.colorAttachmentCount};
@@ -76,6 +81,7 @@ public:
             subRefs.colorAttachments.push_back(colorRef);
         }
         subRefs.depthStencilAttachment = *subpassDesc.description.pDepthStencilAttachment;
+
         setSubpassInfo(subpassDesc, subRefs);
     }
 
@@ -99,11 +105,15 @@ public:
                 depends.push_back(depend);
             }
         }
+        auto createInfoDepends = std::vector<vk::SubpassDependency2>{};
+        for (const auto& dep: depends){
+            createInfoDepends.push_back(dep.get<vk::SubpassDependency2>());
+        }
         vk::RenderPassCreateInfo2 renderPassInfo = {};
         renderPassInfo.setAttachments(attaches);
         renderPassInfo.setSubpasses(passes);
-        renderPassInfo.dependencyCount = depends.size();
-        renderPassInfo.pDependencies = &depends.data()->get<vk::SubpassDependency2>();
+        renderPassInfo.dependencyCount = createInfoDepends.size();
+        renderPassInfo.pDependencies = createInfoDepends.data();
 
         auto [result, renderPass] = device_.createRenderPass2Unique(renderPassInfo);
         utils::vkEnsure(result);
@@ -112,7 +122,7 @@ public:
         return renderpass_;
     }
 
-    vk::UniqueFramebuffer createFramebuffer(vk::Extent2D extent){
+    vk::UniqueFramebuffer createViewlessFramebuffer(vk::Extent2D extent){
         std::vector<vk::FramebufferAttachmentImageInfo> attachInfos{}; attachInfos.resize(attachDescs_.size());
         for (const auto& attach: attachDescs_){
             vk::FramebufferAttachmentImageInfo info{};
@@ -140,12 +150,25 @@ public:
         utils::vkEnsure(result);
         return std::move(fb);
     }
+    
+    vk::UniqueFramebuffer createFramebuffer(vk::Extent2D extent, std::span<const vk::ImageView> views){
+        vk::FramebufferCreateInfo framebufferInfo = {};
+        framebufferInfo.renderPass = renderpass_;
+        framebufferInfo.width = extent.width;
+        framebufferInfo.height = extent.height;
+        framebufferInfo.layers = 1;
+        framebufferInfo.setAttachments(views);
+        auto [result, fb] = device_.createFramebufferUnique(framebufferInfo);
+        utils::vkEnsure(result);
+        return std::move(fb);
+    }
 
 private:
     static void setSubpassInfo(SubpassInfo &subpassInfo, SubpassAttachmentReferences &attachRefs){
-        subpassInfo.description.setColorAttachments(attachRefs.colorAttachments);
         subpassInfo.description.setInputAttachments(attachRefs.inputAttachments);
+        // Only set resolve attachments if there is any, or just set them before color attachments
         subpassInfo.description.setResolveAttachments(attachRefs.resolveAttachments);
+        subpassInfo.description.setColorAttachments(attachRefs.colorAttachments);
         subpassInfo.description.pDepthStencilAttachment = &attachRefs.depthStencilAttachment;
     }
     vk::Device device_{};

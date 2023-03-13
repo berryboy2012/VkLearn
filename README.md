@@ -41,9 +41,10 @@ The rest are trivial stuffs.
 - Can display a hard-coded textured mesh with Model-View-Projection matrices in effect.
 - Can handle window resize and minimize events.
 - Uses right-hand coordinate with correct equivalent implementation of `glm::lookAt` and `glm::perspective`.
-- Has a messy structure.
-- Tries to split some boilerplate into `main.cpp`, while actual rendering code resides in `renderer.hpp`.
+- ~~Has a messy structure.~~ Has a somewhat messy structure.
+- ~~Tries to split some boilerplate into `main.cpp`, while actual rendering code resides in `renderer.hpp`.~~
 - Can load geometries into the GPU and build accelerated structures (AS, usually some form of BVH tree) from them.
+- Multi-threaded.
 
 ## TODO:
 - ~~Vertex staging resource. (Transfer data from/to GPU's local memory)~~
@@ -60,9 +61,9 @@ The rest are trivial stuffs.
   - Yet another thread, dedicated to global resource allocation: Might be hard to manage concurrency.
 - Add basic ray-tracing pipeline.
 - Add shadow map pipeline.
-- Refactoring the code (with the help of VMA), so we don't lose our sanity when using Vulkan. 
- We cannot do this earlier because we haven't implemented a 'working' renderer yet.
-- Build a thin abstract layer to simplify some resource management tasks. (Mostly things with a pool in their names)
+- ~~Refactoring the code (with the help of VMA), so we don't lose our sanity when using Vulkan. 
+ We cannot do this earlier because we haven't implemented a 'working' renderer yet.~~ Almost done.
+- ~~Build a thin abstract layer to simplify some resource management tasks. (Mostly things with a pool in their names)~~
 - OpenVR/OpenXR integration.
 - FSR/DLSS integration.
 - Be able to view arbitrary 3D models.

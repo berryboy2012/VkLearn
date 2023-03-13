@@ -140,7 +140,8 @@ void CommandBufferManager::waitQueueIdle(){
 }
 
 void CommandBufferManager::resetPool(){
-    comPool_.reset();
+    auto result = device_.resetCommandPool(comPool_.get());
+    utils::vkEnsure(result);
 }
 
 SingleTimeCommandBuffer CommandBufferManager::getSingleTimeCommandBuffer(){
