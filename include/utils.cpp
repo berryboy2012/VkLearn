@@ -6,13 +6,17 @@
 #ifndef VKLEARN_UTILS_HPP
 #define VKLEARN_UTILS_HPP
 #include <concepts>
+#include <iostream>
 #include <functional>
 #include <any>
 #include <fstream>
 #include <format>
 #include <map>
+#include <optional>
 #include "glm/glm.hpp"
 #include "spirv_glsl.hpp"
+#include "utils.h"
+#include "commands_management.h"
 
 namespace utils {
     const std::unordered_map<spirv_cross::SPIRType::BaseType, const std::string> spirvTypeNameMap = {
@@ -55,8 +59,8 @@ namespace utils {
             {spirv_cross::SPIRType::BaseType::Float, 4},
             {spirv_cross::SPIRType::BaseType::Double, 8},
             {spirv_cross::SPIRType::BaseType::Struct, 0},
-            //{spirv_cross::SPIRType::BaseType::Image, 0},
-            //{spirv_cross::SPIRType::BaseType::SampledImage, 0},
+            {spirv_cross::SPIRType::BaseType::Image, 0},
+            {spirv_cross::SPIRType::BaseType::SampledImage, 0},
             //{spirv_cross::SPIRType::BaseType::Sampler, 0},
             //{spirv_cross::SPIRType::BaseType::AccelerationStructure, 0},
             //{spirv_cross::SPIRType::BaseType::RayQuery, 0}
@@ -72,12 +76,7 @@ namespace utils {
         vk::Framebuffer framebuffer;
         vk::DescriptorSet descriptor_set;
     };
-    // Useful for storing a series of vk::Image handles along with their infos
-    struct VkImagesPack{
-        std::vector<vk::Image> images;
-        vk::Format format;
-        vk::Extent2D extent;
-    };
+
     // Yanked from https://github.com/KhronosGroup/Vulkan-Hpp/samples/utils/utils.cpp
     VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback( VkDebugUtilsMessageSeverityFlagBitsEXT       messageSeverity,
                                                                 VkDebugUtilsMessageTypeFlagsEXT              messageTypes,
@@ -173,7 +172,7 @@ namespace utils {
         requires std::is_same_v<decltype(T::pNext), void*>;
     };
 
-    inline void vkEnsure(const vk::Result &result, const std::optional<std::string> &prompt = std::nullopt){
+    inline void vkEnsure(const vk::Result &result, const std::optional<std::string> &prompt){
         if (result != vk::Result::eSuccess){
             if (prompt.has_value()){
                 std::cerr<<prompt.value()<<std::endl;
@@ -209,6 +208,17 @@ namespace utils {
         }
     }
 
+    const std::unordered_map<vk::Format, size_t> sizeofVkFormat = {
+        {vk::Format::eR32Sfloat, 4},
+        {vk::Format::eR32G32Sfloat, 8},
+        {vk::Format::eR32G32B32Sfloat, 12},
+        {vk::Format::eR32G32B32A32Sfloat, 16}
+    };
+
+    size_t getSizeofVkFormat(vk::Format format){
+        return sizeofVkFormat.at(format);
+    }
+
     // TODO: add probing support for SSBO
     vk::UniqueShaderModule createShaderModule(const std::string &filePath, vk::Device &device) {
         std::cout<<std::format("\nReading shader bytecode located at {}\n\n", filePath);
@@ -235,7 +245,14 @@ namespace utils {
         for (auto &sampler : resources.sampled_images){
             unsigned set = glsl.get_decoration(sampler.id, spv::DecorationDescriptorSet);
             unsigned binding = glsl.get_decoration(sampler.id, spv::DecorationBinding);
-            std::cout<<std::format("Combined image sampler: {} at set = {}, binding = {}.\n", sampler.name, set, binding);
+            std::cout<<std::format("Combined image sampler: {} at set = {}, binding = {}.\t", sampler.name, set, binding);
+            auto varTypeId = glsl.get_type(sampler.type_id);
+            if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::SampledImage){
+                if (varTypeId.image.ms){
+                    std::cout<<std::format("Is MSAA resolve image.\n");
+                }
+            }
+            std::cout<<"\n";
         }
         {
             size_t offset{0};
@@ -264,6 +281,26 @@ namespace utils {
                 auto binding = glsl.get_decoration(pushConst.id, spv::DecorationBinding);
                 std::cout << std::format("Push constant: {} at set = {}, binding = {};\t", pushConst.name, set, binding);
                 auto varTypeId = glsl.get_type(pushConst.type_id);
+                auto size = varTypeId.vecsize * varTypeId.columns;
+                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
+                    size *= glsl.get_declared_struct_size(varTypeId);
+                } else{
+                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
+                }
+                std::cout << std::format("Size = {} B, base type is {}.\n", size,
+                                         spirvTypeNameMap.at(varTypeId.basetype));
+                probeLayout(glsl, varTypeId, offset, varSize);
+            }
+        }
+        {
+            size_t offset{0};
+            size_t varSize{0};
+            for (auto &subInput: resources.subpass_inputs) {
+                auto set = glsl.get_decoration(subInput.id, spv::DecorationDescriptorSet);
+                auto binding = glsl.get_decoration(subInput.id, spv::DecorationBinding);
+                auto attach = glsl.get_decoration(subInput.id, spv::DecorationInputAttachmentIndex);
+                std::cout << std::format("Subpass input: {} at set = {}, input_attachment_index = {}, binding = {};\t", subInput.name, set, attach, binding);
+                auto varTypeId = glsl.get_type(subInput.type_id);
                 auto size = varTypeId.vecsize * varTypeId.columns;
                 if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
                     size *= glsl.get_declared_struct_size(varTypeId);
@@ -325,92 +362,15 @@ namespace utils {
         utils::vkEnsure(result, "createShaderModule() failed");
         return std::move(shaderModule);
     }
-    // Submit the recorded vk::CommandBuffer and wait once dtor is called.
-    class SingleTimeCommandBuffer {
-    public:
-        vk::CommandBuffer coBuf{};
-        SingleTimeCommandBuffer(const SingleTimeCommandBuffer &) = delete;
-        SingleTimeCommandBuffer& operator= (const SingleTimeCommandBuffer &) = delete;
-        SingleTimeCommandBuffer(vk::CommandPool &commandPool, vk::Queue &queue, vk::Device &device):
-                commandPool_(commandPool),
-                queue_(queue),
-                device_(device)
-        {
-            vk::CommandBufferAllocateInfo allocInfo{};
-            allocInfo.level = vk::CommandBufferLevel::ePrimary;
-            allocInfo.commandPool = commandPool;
-            allocInfo.commandBufferCount = 1;
-            {
-                vk::Result result{};
-                std::tie(result, commBuffs_) = device.allocateCommandBuffers(allocInfo);
-                vkEnsure(result);
-            }
-            coBuf = commBuffs_[0];
-            vk::CommandBufferBeginInfo beginInfo{};
-            beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-            auto result = coBuf.begin(beginInfo);
-            vkEnsure(result);
-        }
-        ~SingleTimeCommandBuffer(){
-            auto result = coBuf.end();
-            vkEnsure(result);
-            vk::SubmitInfo submitInfo{};
-            submitInfo.commandBufferCount = 1;
-            submitInfo.pCommandBuffers = &coBuf;
-            auto subResult = queue_.submit(submitInfo);
-            vkEnsure(subResult);
-            auto waitResult = queue_.waitIdle();
-            vkEnsure(waitResult);
-            device_.freeCommandBuffers(commandPool_, commBuffs_);
-        }
-    private:
-        std::vector<vk::CommandBuffer> commBuffs_{};
-        vk::Device device_{};
-        vk::CommandPool commandPool_{};
-        vk::Queue queue_{};
-    };
-    template<typename T>
-    inline glm::mat<4, 4, T> vkuLookAtRH(glm::vec<3, T> const& eye, glm::vec<3, T> const& center, glm::vec<3, T> const& up)
-    {
-        glm::vec<3, T> const f(normalize(center - eye));
-        glm::vec<3, T> const s(normalize(cross(f, up)));
-        glm::vec<3, T> const u(cross(f, s));
+    vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device){
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.bindingCount = bindings.size();
+        layoutInfo.pBindings = bindings.data();
 
-        glm::mat<4, 4, T> Result(1);
-        Result[0][0] = s.x;
-        Result[1][0] = s.y;
-        Result[2][0] = s.z;
-        Result[0][1] = u.x;
-        Result[1][1] = u.y;
-        Result[2][1] = u.z;
-        Result[0][2] = f.x;
-        Result[1][2] = f.y;
-        Result[2][2] = f.z;
-        Result[3][0] =-dot(s, eye);
-        Result[3][1] =-dot(u, eye);
-        Result[3][2] =-dot(f, eye);
-        return Result;
+        auto [result, descriptorSetLayout] = device.createDescriptorSetLayoutUnique(layoutInfo);
+        utils::vkEnsure(result);
+        return std::move(descriptorSetLayout);
     }
-    template<typename T>
-    inline glm::mat<4, 4, T> vkuPerspectiveRHReverse_ZO(T fovy, T aspect, T zNear, T zFar)
-    {
-        assert(abs(aspect - std::numeric_limits<T>::epsilon()) > static_cast<T>(0));
 
-        T const tanHalfFovy = tan(fovy / static_cast<T>(2));
-
-        glm::mat<4, 4, T> Result(static_cast<T>(0));
-        Result[0][0] = static_cast<T>(1) / (aspect * tanHalfFovy);
-        Result[1][1] = static_cast<T>(1) / (tanHalfFovy);
-        Result[2][2] = zNear / (zNear - zFar);
-        Result[2][3] = static_cast<T>(1);
-        Result[3][2] = (zFar * zNear) / (zFar - zNear);
-        return Result;
-    }
-    // A trick to manually display type names upon compilation
-    template<typename T>
-    class TypeDisplayer;
 }
-    #ifndef SHOW_TYPE
-        #define SHOW_TYPE(obj)      utils::TypeDisplayer<decltype(obj)> LOOK_ME;
-    #endif
-#endif //VKLEARN_UTILS_HPP
+#endif //VKLEARN_UTILS_CPP

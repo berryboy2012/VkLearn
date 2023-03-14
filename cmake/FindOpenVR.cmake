@@ -78,9 +78,3 @@ function(_OpenVR_find)
 endfunction()
 
 _OpenVR_find()
-
-function(_OpenVR_find)
-endfunction()
-
-function(_OpenVR_find)
-endfunction()
