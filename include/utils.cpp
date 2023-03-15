@@ -212,19 +212,53 @@ namespace utils {
         {vk::Format::eR32Sfloat, 4},
         {vk::Format::eR32G32Sfloat, 8},
         {vk::Format::eR32G32B32Sfloat, 12},
-        {vk::Format::eR32G32B32A32Sfloat, 16}
+        {vk::Format::eR32G32B32A32Sfloat, 16},
+        {vk::Format::eR32Sint, 4},
+        {vk::Format::eR32G32Sint, 8},
+        {vk::Format::eR32G32B32Sint, 12},
+        {vk::Format::eR32G32B32A32Sint, 16},
+        {vk::Format::eR32Uint, 4},
+        {vk::Format::eR32G32Uint, 8},
+        {vk::Format::eR32G32B32Uint, 12},
+        {vk::Format::eR32G32B32A32Uint, 16},
+
+        {vk::Format::eR64Sfloat, 8},
+        {vk::Format::eR64G64Sfloat, 16},
+        {vk::Format::eR64G64B64Sfloat, 24},
+        {vk::Format::eR64G64B64A64Sfloat, 32},
+        {vk::Format::eR64Sint, 8},
+        {vk::Format::eR64G64Sint, 16},
+        {vk::Format::eR64G64B64Sint, 24},
+        {vk::Format::eR64G64B64A64Sint, 32},
+        {vk::Format::eR64Uint, 8},
+        {vk::Format::eR64G64Uint, 16},
+        {vk::Format::eR64G64B64Uint, 24},
+        {vk::Format::eR64G64B64A64Uint, 32},
+
+        {vk::Format::eR16Sfloat, 2},
+        {vk::Format::eR16G16Sfloat, 4},
+        {vk::Format::eR16G16B16Sfloat, 6},
+        {vk::Format::eR16G16B16A16Sfloat, 8},
+        {vk::Format::eR16Sint, 2},
+        {vk::Format::eR16G16Sint, 4},
+        {vk::Format::eR16G16B16Sint, 6},
+        {vk::Format::eR16G16B16A16Sint, 8},
+        {vk::Format::eR16Uint, 2},
+        {vk::Format::eR16G16Uint, 4},
+        {vk::Format::eR16G16B16Uint, 6},
+        {vk::Format::eR16G16B16A16Uint, 8},
+        {vk::Format::eUndefined, 0}
     };
 
     size_t getSizeofVkFormat(vk::Format format){
         return sizeofVkFormat.at(format);
     }
 
-    // TODO: add probing support for SSBO
-    vk::UniqueShaderModule createShaderModule(const std::string &filePath, vk::Device &device) {
-        std::cout<<std::format("\nReading shader bytecode located at {}\n\n", filePath);
+    std::vector<uint32_t> loadShaderByteCode(const std::string_view &filePath){
         auto irCode = std::vector<uint32_t>();
+        const std::string filePathString{filePath};
         {
-            std::ifstream file(filePath, std::ios::ate | std::ios::binary);
+            std::ifstream file(filePathString, std::ios::ate | std::ios::binary);
             if (!file.is_open()) {
                 std::abort();
             }
@@ -239,129 +273,18 @@ namespace utils {
             irCode.resize(byteSize/sizeof(decltype(irCode)::value_type));
             std::memcpy(irCode.data(), buffer.data(), byteSize);
         }
-        spirv_cross::CompilerGLSL glsl(irCode);
-        spirv_cross::ShaderResources resources = glsl.get_shader_resources();
+        return irCode;
+    }
 
-        for (auto &sampler : resources.sampled_images){
-            unsigned set = glsl.get_decoration(sampler.id, spv::DecorationDescriptorSet);
-            unsigned binding = glsl.get_decoration(sampler.id, spv::DecorationBinding);
-            std::cout<<std::format("Combined image sampler: {} at set = {}, binding = {}.\t", sampler.name, set, binding);
-            auto varTypeId = glsl.get_type(sampler.type_id);
-            if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::SampledImage){
-                if (varTypeId.image.ms){
-                    std::cout<<std::format("Is MSAA resolve image.\n");
-                }
-            }
-            std::cout<<"\n";
-        }
-        {
-            size_t offset{0};
-            size_t varSize{0};
-            for (auto &ubo: resources.uniform_buffers) {
-                auto set = glsl.get_decoration(ubo.id, spv::DecorationDescriptorSet);
-                auto binding = glsl.get_decoration(ubo.id, spv::DecorationBinding);
-                std::cout << std::format("Uniform buffer: {} at set = {}, binding = {};\t", ubo.name, set, binding);
-                auto varTypeId = glsl.get_type(ubo.type_id);
-                auto size = varTypeId.vecsize * varTypeId.columns;
-                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
-                    size *= glsl.get_declared_struct_size(varTypeId);
-                } else{
-                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
-                }
-                std::cout << std::format("Size = {} B, base type is {}.\n", size,
-                                         spirvTypeNameMap.at(varTypeId.basetype));
-                probeLayout(glsl, varTypeId, offset, varSize);
-            }
-        }
-        {
-            size_t offset{0};
-            size_t varSize{0};
-            for (auto &pushConst: resources.push_constant_buffers) {
-                auto set = glsl.get_decoration(pushConst.id, spv::DecorationDescriptorSet);
-                auto binding = glsl.get_decoration(pushConst.id, spv::DecorationBinding);
-                std::cout << std::format("Push constant: {} at set = {}, binding = {};\t", pushConst.name, set, binding);
-                auto varTypeId = glsl.get_type(pushConst.type_id);
-                auto size = varTypeId.vecsize * varTypeId.columns;
-                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
-                    size *= glsl.get_declared_struct_size(varTypeId);
-                } else{
-                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
-                }
-                std::cout << std::format("Size = {} B, base type is {}.\n", size,
-                                         spirvTypeNameMap.at(varTypeId.basetype));
-                probeLayout(glsl, varTypeId, offset, varSize);
-            }
-        }
-        {
-            size_t offset{0};
-            size_t varSize{0};
-            for (auto &subInput: resources.subpass_inputs) {
-                auto set = glsl.get_decoration(subInput.id, spv::DecorationDescriptorSet);
-                auto binding = glsl.get_decoration(subInput.id, spv::DecorationBinding);
-                auto attach = glsl.get_decoration(subInput.id, spv::DecorationInputAttachmentIndex);
-                std::cout << std::format("Subpass input: {} at set = {}, input_attachment_index = {}, binding = {};\t", subInput.name, set, attach, binding);
-                auto varTypeId = glsl.get_type(subInput.type_id);
-                auto size = varTypeId.vecsize * varTypeId.columns;
-                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct){
-                    size *= glsl.get_declared_struct_size(varTypeId);
-                } else{
-                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
-                }
-                std::cout << std::format("Size = {} B, base type is {}.\n", size,
-                                         spirvTypeNameMap.at(varTypeId.basetype));
-                probeLayout(glsl, varTypeId, offset, varSize);
-            }
-        }
-        // `in` and `out` won't be struct, stay cool dude.
-        {
-            size_t offset{0};
-            size_t varSize{0};
-            for (auto &inputAttr: resources.stage_inputs) {
-                auto set = glsl.get_decoration(inputAttr.id, spv::DecorationDescriptorSet);
-                auto binding = glsl.get_decoration(inputAttr.id, spv::DecorationBinding);
-                auto location = glsl.get_decoration(inputAttr.id, spv::DecorationLocation);
-                std::cout << std::format("Input attribute: {} at set = {}, binding = {}, location = {};\t",
-                                         inputAttr.name, set, binding, location);
-                auto varTypeId = glsl.get_type(inputAttr.type_id);
-                auto size = varTypeId.vecsize * varTypeId.columns;
-                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct) {
-                    size *= glsl.get_declared_struct_size(varTypeId);
-                } else {
-                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
-                }
-                std::cout << std::format("Size = {} B, base type is {}.\n", size,
-                                         spirvTypeNameMap.at(varTypeId.basetype));
-                probeLayout(glsl, varTypeId, offset, varSize);
-            }
-        }
-        {
-            size_t offset{0};
-            size_t varSize{0};
-            for (auto &outputAttr: resources.stage_outputs) {
-                auto set = glsl.get_decoration(outputAttr.id, spv::DecorationDescriptorSet);
-                auto binding = glsl.get_decoration(outputAttr.id, spv::DecorationBinding);
-                auto location = glsl.get_decoration(outputAttr.id, spv::DecorationLocation);
-                std::cout << std::format("Output attribute: {} at set = {}, binding = {}, location = {};\t",
-                                         outputAttr.name, set, binding, location);
-                auto varTypeId = glsl.get_type(outputAttr.type_id);
-                auto size = varTypeId.vecsize * varTypeId.columns;
-                if (varTypeId.basetype == spirv_cross::SPIRType::BaseType::Struct) {
-                    size *= glsl.get_declared_struct_size(varTypeId);
-                } else {
-                    size *= spirvTypeSizeMap.at(varTypeId.basetype);
-                }
-                std::cout << std::format("Size = {} B, base type is {}.\n", size,
-                                         spirvTypeNameMap.at(varTypeId.basetype));
-                probeLayout(glsl, varTypeId, offset, varSize);
-            }
-        }
-
+    vk::UniqueShaderModule createShaderModule(const std::string_view &filePath, vk::Device &device) {
+        auto irCode = loadShaderByteCode(filePath);
         auto [result, shaderModule] = device.createShaderModuleUnique({vk::ShaderModuleCreateFlags(),
                                                                        irCode.size()*sizeof(decltype(irCode)::value_type),
                                                                        irCode.data()});
         utils::vkEnsure(result, "createShaderModule() failed");
         return std::move(shaderModule);
     }
+
     vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device){
         vk::DescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.bindingCount = bindings.size();

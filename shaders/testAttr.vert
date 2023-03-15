@@ -24,15 +24,23 @@ layout(binding = 0) uniform ModelUB {
     mat4 model;
 } modelUBO;
 
-layout (binding = 1) uniform ParameterUBO {
+layout (set = 1, binding = 1) uniform ParameterUBO {
     float deltaTime;
 } ubo;
 
-layout(std140, binding = 2) readonly buffer ParticleSSBOIn {
+layout (binding = 2) uniform ArrayUBO {
+    float deltaTime;
+} arrayUBO[2];
+
+layout (binding = 3) uniform UnknownArrayUBO {
+    float deltaTime;
+} arrayVarUBO[];
+
+layout(std140, binding = 4) readonly buffer ParticleSSBOIn {
     Particle particlesIn[ ];
 };
 
-layout(std140, binding = 3) buffer ParticleSSBOOut {
+layout(std140, binding = 5) buffer ParticleSSBOOut {
     Particle particlesOut[ ];
 };
 

@@ -36,7 +36,6 @@ namespace utils {
     std::vector<char> readFile(const std::string& filePath);
     std::tuple<std::vector<const char*>, uint32_t> stringToVecptrU32(const std::vector<std::string> &strings);
     inline void vkEnsure(const vk::Result &result, const std::optional<std::string> &prompt = std::nullopt);
-    void probeLayout(spirv_cross::CompilerGLSL &glsl, spirv_cross::SPIRType &objType, size_t &offset, size_t &size);
     template <typename T>
     concept isGlmType = requires (){
         typename T::value_type;
@@ -59,7 +58,8 @@ namespace utils {
         }
     }
     size_t getSizeofVkFormat(vk::Format format);
-    vk::UniqueShaderModule createShaderModule(const std::string &filePath, vk::Device &device);
+    std::vector<uint32_t> loadShaderByteCode(const std::string_view &filePath);
+    vk::UniqueShaderModule createShaderModule(const std::string_view &filePath, vk::Device &device);
     vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device);
 
     template<typename T>
@@ -107,6 +107,46 @@ namespace utils {
     // A trick to manually display type names upon compilation
     template<typename T>
     class TypeDisplayer;
+    // Meta programming tricks
+    namespace meta_trick{
+        // Get number of members (with unique memory addresses) of a struct,
+        // yanked from comments at https://stackoverflow.com/a/38575501 ,
+        //  usage: struct S3{int a,b;bool c;}; member_count<S3> == 3
+        struct Any
+        {
+            template <typename T> operator T();
+        };
+
+        template <typename T, std::size_t I>
+        using always_t = T;
+
+
+        template <typename T, typename ... Args>
+        auto is_aggregate_constructible_impl(int) -> decltype(T{std::declval<Args>()...}, void(), std::true_type{});
+
+        template <typename T, typename ... Args>
+        auto is_aggregate_constructible_impl(...) -> std::false_type;
+
+        template <typename T, typename ... Args>
+        using is_aggregate_constructible = decltype(is_aggregate_constructible_impl<T, Args...>(0));
+
+        template <typename T, typename Seq> struct has_n_member_impl;
+
+        template <typename T, std::size_t ... Is>
+        struct has_n_member_impl<T, std::index_sequence<Is...>> : is_aggregate_constructible<T, always_t<Any, Is>...> {};
+
+        template <typename T, std::size_t N>
+        using has_n_member = has_n_member_impl<T, std::make_index_sequence<N>>;
+
+        template <typename T, typename Seq> struct member_count_impl;
+
+        template <typename T, std::size_t ... Is>
+        struct member_count_impl<T, std::index_sequence<Is...>> : std::integral_constant<std::size_t, std::max({(has_n_member<T, Is>() * Is)...})> {};
+
+        template <typename T>
+        using member_count = member_count_impl<T, std::make_index_sequence<1 + sizeof (T)>>;
+    }
+
 
     struct QueueStruct{
         vk::Queue queue{};
