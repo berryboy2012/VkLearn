@@ -279,10 +279,10 @@ private:
         vk::SubpassDescription2 description{};
         description.flags = {};
         description.colorAttachmentCount = fragShader_.attachmentReferences_.colorAttachments.size();
-        description.pColorAttachments = fragShader_.attachmentReferences_.colorAttachments.data_();
+        description.pColorAttachments = fragShader_.attachmentReferences_.colorAttachments.data();
         description.inputAttachmentCount = fragShader_.attachmentReferences_.inputAttachments.size();
-        description.pInputAttachments = fragShader_.attachmentReferences_.inputAttachments.data_();
-        description.pResolveAttachments = fragShader_.attachmentReferences_.resolveAttachments.data_();
+        description.pInputAttachments = fragShader_.attachmentReferences_.inputAttachments.data();
+        description.pResolveAttachments = fragShader_.attachmentReferences_.resolveAttachments.data();
         description.pDepthStencilAttachment = &fragShader_.attachmentReferences_.depthStencilAttachment;
         SubpassInfo info{};
         info.description = description;
