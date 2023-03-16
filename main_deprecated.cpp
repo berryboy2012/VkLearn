@@ -40,7 +40,7 @@ std::vector<vk::UniqueImageView> createImageViews(
 #include "memory_management.hpp"
 #include "renderer_deprecated.hpp"
 #include "rt_renderer.hpp"
-void queryOVR(){
+void query_ovr(){
     vr::EVRInitError eError = vr::VRInitError_None;
     auto m_pHMD = vr::VR_Init( &eError, vr::VRApplication_Utility );
     auto OVRVer = m_pHMD->GetRuntimeVersion();
@@ -58,7 +58,7 @@ void queryOVR(){
     }
 
 }
-SDL_Window* initSDL(){
+SDL_Window* init_sdl(){
     SDL_Init(SDL_INIT_VIDEO);
     SDL_Vulkan_LoadLibrary(nullptr);
     auto window = SDL_CreateWindow(
@@ -69,14 +69,14 @@ SDL_Window* initSDL(){
     SDL_SetWindowResizable(window, SDL_TRUE);
     return window;
 }
-void cleanSDL(SDL_Window* &window){
+void clean_sdl(SDL_Window* &window){
     SDL_DestroyWindow(window);
     window = nullptr;
     SDL_Vulkan_UnloadLibrary();
     SDL_Quit();
 }
 
-std::vector<std::string> getRequiredValidationLayers(bool enableValidationLayers) {
+std::vector<std::string> get_required_validation_layers(bool enableValidationLayers) {
     auto validationLayers = std::vector<std::string>{"VK_LAYER_KHRONOS_validation"};
     if (enableValidationLayers) {
         auto [layerResult, availableLayers] = vk::enumerateInstanceLayerProperties();
@@ -96,7 +96,7 @@ std::vector<std::string> getRequiredValidationLayers(bool enableValidationLayers
     return validationLayers;
 }
 
-std::vector<std::string> getRequiredInstanceExtensions(SDL_Window *window, bool enableValidationLayers) {
+std::vector<std::string> get_required_instance_extensions(SDL_Window *window, bool enableValidationLayers) {
     auto instanceExtensions = std::vector<std::string>{};
     {
         // First get extensions required by SDL
@@ -144,7 +144,7 @@ std::tuple<uint32_t, uint32_t> findQueueFamilyInfo(
 
 //TODO: add extension query for OpenVR
 //Remember, most extensions require respective features to work
-std::vector<std::string> getRequiredDeviceExtensions(){
+std::vector<std::string> get_required_device_extensions(){
     std::vector< std::string > requiredDeviceExtensions{
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         // Vulkan Ray Tracing (https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/#raytracingsetup)
@@ -165,7 +165,7 @@ std::vector<std::string> getRequiredDeviceExtensions(){
 
 // A jank way to store a linked list of VkPhysDevFeatures, the first element can be retrieved by std::any_cast<vk::PhysicalDeviceFeatures2&>.
 // Should use vk::StructureChain instead. Do not copy the returned list!
-std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &device){
+std::vector<std::any> get_required_device_features_2(const vk::PhysicalDevice &device){
     using Feature2 = vk::PhysicalDeviceFeatures2;
     // https://vulkan.lunarg.com/doc/view/1.3.239.0/windows/1.3-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pNext-02829
     using Vulkan11 = vk::PhysicalDeviceVulkan11Features;
@@ -200,7 +200,7 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     return featureList;
 }
 
-vk::UniqueInstance createVulkanInstance(const std::vector<std::string> &validationLayers, const std::vector<std::string> &instanceExtensions) {
+vk::UniqueInstance create_vulkan_instance(const std::vector<std::string> &validationLayers, const std::vector<std::string> &instanceExtensions) {
     auto appInfo = vk::ApplicationInfo(
             "VkLearn",
             VK_MAKE_VERSION(1, 0, 0),
@@ -235,7 +235,7 @@ vk::UniqueInstance createVulkanInstance(const std::vector<std::string> &validati
     return std::move(vkUniqueInstance);
 }
 
-vk::UniqueDebugUtilsMessengerEXT createVulkanDebugMsg(const vk::Instance &vkInstance) {
+vk::UniqueDebugUtilsMessengerEXT create_vulkan_debug_msg(const vk::Instance &vkInstance) {
     using SeverityBits = vk::DebugUtilsMessageSeverityFlagBitsEXT;
     using MsgTypeBits = vk::DebugUtilsMessageTypeFlagBitsEXT;
 
@@ -251,7 +251,7 @@ vk::UniqueDebugUtilsMessengerEXT createVulkanDebugMsg(const vk::Instance &vkInst
 
 }
 
-vk::PhysicalDevice getPhysicalDevice(const vk::Instance &vkInstance) {
+vk::PhysicalDevice get_physical_device(const vk::Instance &vkInstance) {
     auto [resultDevices, devices] = vkInstance.enumeratePhysicalDevices();
     utils::vkEnsure(resultDevices);
     auto chosenPhysicalDevice = vk::PhysicalDevice{};
@@ -309,7 +309,7 @@ std::tuple<vk::UniqueDevice, std::vector<vk::Queue>> createVulkanDevicenQueues(
     return std::make_tuple(std::move(logicDevice),queues);
 }
 
-vk::UniqueSurfaceKHR createSurfaceSDL(SDL_Window *p_SDLWindow, const vk::Instance &vkInstance) {
+vk::UniqueSurfaceKHR create_surface_sdl(SDL_Window *p_SDLWindow, const vk::Instance &vkInstance) {
     VkSurfaceKHR tmpSurface{};
     if (SDL_Vulkan_CreateSurface(p_SDLWindow, vkInstance, &tmpSurface) != SDL_TRUE){
         std::abort();
@@ -597,7 +597,7 @@ vk::UniqueCommandPool createCommandPool(vk::PhysicalDevice &chosenDevice, vk::De
     return std::move(commandPool);
 }
 
-bool wantExitSDL(){
+bool want_exit_sdl(){
     SDL_Event sdlEvent;
     bool bRet = false;
 

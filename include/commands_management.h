@@ -25,7 +25,7 @@
 class SingleTimeCommandBuffer {
     // Submit the recorded vk::CommandBuffer and wait once dtor is called.
 public:
-    vk::CommandBuffer coBuf{};
+    vk::CommandBuffer coBuf_{};
     SingleTimeCommandBuffer() = default;
     SingleTimeCommandBuffer(const SingleTimeCommandBuffer &) = delete;
     SingleTimeCommandBuffer& operator= (const SingleTimeCommandBuffer &) = delete;

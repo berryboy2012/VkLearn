@@ -46,11 +46,11 @@ public:
         auto tiling = vk::ImageTiling::eOptimal;
         auto usage = ImgUsage::eTransferDst | ImgUsage::eSampled;
         std::span<Pixel> pixels{(Pixel*)pixels_, extent_.width*extent_.height*extent_.depth};
-        data = resMgrRef.createImagenMemoryFromHostData<Pixel>(pixels,
-                extent_, format, tiling, imageLayout_, usage);
-        image_ = data.resource.get();
-        data.createView(vk::ImageAspectFlagBits::eColor);
-        view_ = data.view.get();
+        data_ = resMgrRef.createImagenMemoryFromHostData<Pixel>(pixels,
+                                                                extent_, format, tiling, imageLayout_, usage);
+        image_ = data_.resource.get();
+        data_.createView(vk::ImageAspectFlagBits::eColor);
+        view_ = data_.view.get();
         imageLayout_ = vk::ImageLayout::eShaderReadOnlyOptimal; // Set by createImagenMemoryFromHostData
         sampler_ = resMgrRef.createTextureSampler();
     }
@@ -59,9 +59,9 @@ public:
     TextureObject& operator= (const TextureObject &) = delete;
     TextureObject& operator= (TextureObject &&other) noexcept {
         if (this != &other) [[likely]]{
-            data = std::move(other.data);
-            image_ = data.resource.get();
-            view_ = data.view.get();
+            data_ = std::move(other.data_);
+            image_ = data_.resource.get();
+            view_ = data_.view.get();
             sampler_ = std::move(other.sampler_);
             imageLayout_ = other.imageLayout_;
             extent_ = other.extent_;
@@ -81,6 +81,6 @@ public:
     }
 private:
     stbi_uc* pixels_{};
-    VulkanImageMemory data{};
+    VulkanImageMemory data_{};
 };
 #endif //VKLEARN_RESOURCE_MANAGEMENT_HPP

@@ -5,7 +5,7 @@
 #ifndef VKLEARN_RENDER_THREAD_HPP
 #define VKLEARN_RENDER_THREAD_HPP
 
-void renderWorkThread(
+void render_work_thread(
         size_t inflightIndex,
         vk::Instance inst, vk::PhysicalDevice physDev, PhysicalDeviceInfo devProps, vk::Device renderDev,
         uint32_t queueFamilyIndex,
@@ -15,7 +15,7 @@ void renderWorkThread(
     auto renderQueue = utils::QueueStruct{.queue = renderDev.getQueue(queueFamilyIndex,
                                                                       inflightIndex), .queueFamilyIdx = queueFamilyIndex};
     auto resMgr = VulkanResourceManager{std::forward<VulkanResourceManager>(resMgrHdl)};resMgr.setupManagerHandle(renderQueue);
-    auto viewport = getViewportInfo(renderExtent.width, renderExtent.height);
+    auto viewport = get_viewport_info(renderExtent.width, renderExtent.height);
     /*The order of preparing stuffs:
      * Descriptor
      * Renderpass and Image-less FrameBuffer
@@ -128,10 +128,10 @@ void renderWorkThread(
                                 1);
 
     // Lastly, create other resources required by the renderpass
-    auto modelVertInputHost = model_info::vertices;
+    auto modelVertInputHost = model_info::gVertices;
     auto modelVertInputDevice = resMgr.createBuffernMemoryFromHostData<model_info::PCTVertex>(modelVertInputHost,
                                                                                               vk::BufferUsageFlagBits::eVertexBuffer);
-    auto modelVertIdxHost = model_info::vertexIdx;
+    auto modelVertIdxHost = model_info::gVertexIdx;
     auto modelVertIdxDevice = resMgr.createBuffernMemoryFromHostData<model_info::VertIdxType>(modelVertIdxHost,
                                                                                               vk::BufferUsageFlagBits::eIndexBuffer);
     auto sceneVP = ScenePushConstants{};
@@ -143,7 +143,7 @@ void renderWorkThread(
     vk::FenceCreateInfo cmdPoolRstFenceInfo{};
     cmdPoolRstFenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
     auto [resultFence, commandPoolResetFence] = renderDev.createFenceUnique(cmdPoolRstFenceInfo);
-    utils::vkEnsure(resultFence);
+    utils::vk_ensure(resultFence);
     while (!exitSignal) {
         // Begin of pacing-insensitive tasks
         auto &commandBuffer = cmdBufs[0];
@@ -167,10 +167,10 @@ void renderWorkThread(
             }
         } while (!exitSignal & !resumeRender);
         cmdMgr.resetPool();
-        utils::vkEnsure(renderDev.resetFences(commandPoolResetFence.get()));
+        utils::vk_ensure(renderDev.resetFences(commandPoolResetFence.get()));
 
         auto beginResult = commandBuffer.begin(beginInfo);
-        utils::vkEnsure(beginResult);
+        utils::vk_ensure(beginResult);
 
         vk::RenderPassBeginInfo renderPassInfo = {};
         renderPassInfo.renderPass = renderpassMgr.renderpass_;
@@ -299,9 +299,9 @@ void renderWorkThread(
         commandBuffer.endRenderPass();
 
         auto endResult = commandBuffer.end();
-        utils::vkEnsure(endResult);
+        utils::vk_ensure(endResult);
         auto resultSubmit = renderQueue.queue.submit2(submitInfo2, commandPoolResetFence.get());
-        utils::vkEnsure(resultSubmit);
+        utils::vk_ensure(resultSubmit);
         // Notify the main thread that submission process is complete
         mainRendererComms[inflightIndex].imageViewHandleConsumed.release();
         // After submit

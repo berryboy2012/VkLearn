@@ -19,7 +19,7 @@
 #include "commands_management.h"
 
 namespace utils {
-    const std::unordered_map<spirv_cross::SPIRType::BaseType, const std::string> spirvTypeNameMap = {
+    const std::unordered_map<spirv_cross::SPIRType::BaseType, const std::string> gSpirvTypeNameMap = {
             {spirv_cross::SPIRType::BaseType::Unknown, "Unknown"},
             {spirv_cross::SPIRType::BaseType::Void, "Void"},
             {spirv_cross::SPIRType::BaseType::Boolean, "Boolean"},
@@ -42,7 +42,7 @@ namespace utils {
             {spirv_cross::SPIRType::BaseType::AccelerationStructure, "AccelerationStructure"},
             {spirv_cross::SPIRType::BaseType::RayQuery, "RayQuery"}
     };
-    const std::unordered_map<spirv_cross::SPIRType::BaseType, size_t> spirvTypeSizeMap = {
+    const std::unordered_map<spirv_cross::SPIRType::BaseType, size_t> gSpirvTypeSizeMap = {
             //{spirv_cross::SPIRType::BaseType::Unknown, 0},
             //{spirv_cross::SPIRType::BaseType::Void, 0},
             //{spirv_cross::SPIRType::BaseType::Boolean, 0},
@@ -68,20 +68,20 @@ namespace utils {
     struct SwapchainImageResources {
         vk::Image image;
         vk::CommandBuffer cmd;
-        vk::CommandBuffer graphics_to_present_cmd;
+        vk::CommandBuffer graphicsToPresentCmd;
         vk::ImageView view;
-        vk::Buffer uniform_buffer;
-        vk::DeviceMemory uniform_memory;
-        void *uniform_memory_ptr = nullptr;
+        vk::Buffer uniformBuffer;
+        vk::DeviceMemory uniformMemory;
+        void *uniformMemoryPtr = nullptr;
         vk::Framebuffer framebuffer;
-        vk::DescriptorSet descriptor_set;
+        vk::DescriptorSet descriptorSet;
     };
 
     // Yanked from https://github.com/KhronosGroup/Vulkan-Hpp/samples/utils/utils.cpp
-    VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback( VkDebugUtilsMessageSeverityFlagBitsEXT       messageSeverity,
-                                                                VkDebugUtilsMessageTypeFlagsEXT              messageTypes,
-                                                                VkDebugUtilsMessengerCallbackDataEXT const * pCallbackData,
-                                                                void * /*pUserData*/ )
+    VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(VkDebugUtilsMessageSeverityFlagBitsEXT       messageSeverity,
+                                                                  VkDebugUtilsMessageTypeFlagsEXT              messageTypes,
+                                                                  VkDebugUtilsMessengerCallbackDataEXT const * pCallbackData,
+                                                                  void * /*pUserData*/ )
     {
 #if !defined( NDEBUG )
         if ( pCallbackData->messageIdNumber == 648835635 )
@@ -135,7 +135,7 @@ namespace utils {
         return VK_TRUE;
     }
 
-    std::vector<char> readFile(const std::string& filePath) {
+    std::vector<char> read_file(const std::string& filePath) {
         std::ifstream file(filePath, std::ios::ate | std::ios::binary);
 
         if (!file.is_open()) {
@@ -172,7 +172,7 @@ namespace utils {
         requires std::is_same_v<decltype(T::pNext), void*>;
     };
 
-    inline void vkEnsure(const vk::Result &result, const std::optional<std::string> &prompt){
+    inline void vk_ensure(const vk::Result &result, const std::optional<std::string> &prompt){
         if (result != vk::Result::eSuccess){
             if (prompt.has_value()){
                 std::cerr<<prompt.value()<<std::endl;
@@ -190,12 +190,12 @@ namespace utils {
                 probeLayout(glsl, memberType, offset, size);
             }
         } else {
-            if (spirvTypeSizeMap.contains(objType.basetype)){
+            if (gSpirvTypeSizeMap.contains(objType.basetype)){
                 offset = offset + size;
-                size = spirvTypeSizeMap.at(objType.basetype)*objType.columns*objType.vecsize;
+                size = gSpirvTypeSizeMap.at(objType.basetype) * objType.columns * objType.vecsize;
             }
             auto name = std::string{};
-            name = spirvTypeNameMap.at(objType.basetype);
+            name = gSpirvTypeNameMap.at(objType.basetype);
             if (objType.vecsize != 1) {
                 if (objType.columns == 1) {
                     name = std::format("{}vec{}", name, objType.vecsize);
@@ -250,11 +250,11 @@ namespace utils {
         {vk::Format::eUndefined, 0}
     };
 
-    size_t getSizeofVkFormat(vk::Format format){
+    size_t get_sizeof_vk_format(vk::Format format){
         return sizeofVkFormat.at(format);
     }
 
-    std::vector<uint32_t> loadShaderByteCode(const std::string_view &filePath){
+    std::vector<uint32_t> load_shader_byte_code(const std::string_view &filePath){
         auto irCode = std::vector<uint32_t>();
         const std::string filePathString{filePath};
         {
@@ -276,22 +276,22 @@ namespace utils {
         return irCode;
     }
 
-    vk::UniqueShaderModule createShaderModule(const std::string_view &filePath, vk::Device &device) {
-        auto irCode = loadShaderByteCode(filePath);
+    vk::UniqueShaderModule create_shader_module(const std::string_view &filePath, vk::Device &device) {
+        auto irCode = load_shader_byte_code(filePath);
         auto [result, shaderModule] = device.createShaderModuleUnique({vk::ShaderModuleCreateFlags(),
                                                                        irCode.size()*sizeof(decltype(irCode)::value_type),
                                                                        irCode.data()});
-        utils::vkEnsure(result, "createShaderModule() failed");
+        utils::vk_ensure(result, "create_shader_module() failed");
         return std::move(shaderModule);
     }
 
-    vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device){
+    vk::UniqueDescriptorSetLayout create_descriptor_set_layout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device){
         vk::DescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.bindingCount = bindings.size();
         layoutInfo.pBindings = bindings.data();
 
         auto [result, descriptorSetLayout] = device.createDescriptorSetLayoutUnique(layoutInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         return std::move(descriptorSetLayout);
     }
 

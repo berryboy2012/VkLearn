@@ -49,7 +49,7 @@ struct PCTVertex {
  *
  * For 3D coordinates, we follow the right hand rules.
  * */
-const std::vector<PCTVertex> vertices = {
+const std::vector<PCTVertex> gVertices = {
         //base
         {{0.0f,  -0.5f, 0.0f},  {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}},//R
         {{0.5f,  0.5f,  0.0f},  {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},//G
@@ -87,7 +87,7 @@ const std::vector<PCTVertex> vertices = {
  * accordingly.
  * */
 typedef uint16_t VertIdxType;
-const std::vector<VertIdxType> vertexIdx = {
+const std::vector<VertIdxType> gVertexIdx = {
         0, 1, 3,
         1, 2, 4,
         2, 0, 5,

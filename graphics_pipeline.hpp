@@ -13,7 +13,7 @@ struct ViewportInfo{
     vk::Viewport viewport{};
     vk::Rect2D scissor{};
 };
-ViewportInfo getViewportInfo(uint32_t width, uint32_t height){
+ViewportInfo get_viewport_info(uint32_t width, uint32_t height){
     ViewportInfo result{};
     result.viewport.x = 0.0f;
     result.viewport.y = 0.0f;
@@ -221,7 +221,7 @@ public:
     vk::DescriptorSetLayout getDescriptorLayout(DescSetIdx index){
         if (!descLayout_.contains(index)){
 
-            descLayout_[index] = utils::createDescriptorSetLayout(bindings_.at(index), device_);
+            descLayout_[index] = utils::create_descriptor_set_layout(bindings_.at(index), device_);
         }
         return descLayout_[index].get();
     }
@@ -237,7 +237,7 @@ public:
         pipelineLayoutInfo.flags = {};
 
         auto [pLResult, pipelineLayout] = device_.createPipelineLayoutUnique(pipelineLayoutInfo);
-        utils::vkEnsure(pLResult);
+        utils::vk_ensure(pLResult);
         pipeLayout_ = std::move(pipelineLayout);
         pipelineLayout_ = pipeLayout_.get();
         return pipelineLayout_;
@@ -268,7 +268,7 @@ public:
         pipelineInfo.basePipelineHandle = nullptr;
 
         auto [graphPipeResult, graphicsPipeline] = device_.createGraphicsPipelineUnique(nullptr, pipelineInfo);
-        utils::vkEnsure(graphPipeResult);
+        utils::vk_ensure(graphPipeResult);
         pipe_ = std::move(graphicsPipeline);
         pipeline_ = pipe_.get();
         return pipeline_;
@@ -279,10 +279,10 @@ private:
         vk::SubpassDescription2 description{};
         description.flags = {};
         description.colorAttachmentCount = fragShader_.attachmentReferences_.colorAttachments.size();
-        description.pColorAttachments = fragShader_.attachmentReferences_.colorAttachments.data();
+        description.pColorAttachments = fragShader_.attachmentReferences_.colorAttachments.data_();
         description.inputAttachmentCount = fragShader_.attachmentReferences_.inputAttachments.size();
-        description.pInputAttachments = fragShader_.attachmentReferences_.inputAttachments.data();
-        description.pResolveAttachments = fragShader_.attachmentReferences_.resolveAttachments.data();
+        description.pInputAttachments = fragShader_.attachmentReferences_.inputAttachments.data_();
+        description.pResolveAttachments = fragShader_.attachmentReferences_.resolveAttachments.data_();
         description.pDepthStencilAttachment = &fragShader_.attachmentReferences_.depthStencilAttachment;
         SubpassInfo info{};
         info.description = description;

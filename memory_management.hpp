@@ -44,7 +44,7 @@ struct VulkanBufferMemory{
         return *this;
     }
 };
-vk::ImageViewCreateInfo imageViewInfoBuilder(
+vk::ImageViewCreateInfo image_view_info_builder(
         vk::Image image, vk::ImageType imageType, vk::Format format, uint32_t mipLevelCount, uint32_t imgCount,
         const vk::ImageAspectFlags imageAspect){
     vk::ImageViewCreateInfo createInfo = {};
@@ -73,7 +73,7 @@ vk::ImageViewCreateInfo imageViewInfoBuilder(
     return createInfo;
 }
 struct VulkanImageMemory{
-    vk::Device device_{};
+    vk::Device device{};
     vk::UniqueHandle<vma::Allocation,vma::Dispatcher> mem{};
     vma::AllocationInfo auxInfo{};
     vk::UniqueHandle<vk::Image,vma::Dispatcher> resource{};
@@ -88,7 +88,7 @@ struct VulkanImageMemory{
     }
     VulkanImageMemory& operator= (VulkanImageMemory &&other) noexcept {
         if (this != &other) [[likely]]{
-            device_ = other.device_;
+            device = other.device;
             mem = std::move(other.mem);
             auxInfo = other.auxInfo;
             resource = std::move(other.resource);
@@ -98,17 +98,17 @@ struct VulkanImageMemory{
         return *this;
     }
     void createView(const vk::ImageAspectFlags imageAspect){
-        auto createInfo = imageViewInfoBuilder(
+        auto createInfo = image_view_info_builder(
                 resource.get(),
                 resInfo.imageType, resInfo.format, resInfo.mipLevels, resInfo.arrayLayers,
                 imageAspect);
-        auto [result, imgView] = device_.createImageViewUnique(createInfo);
-        utils::vkEnsure(result);
+        auto [result, imgView] = device.createImageViewUnique(createInfo);
+        utils::vk_ensure(result);
         view = std::move(imgView);
     }
 };
 struct VulkanImageHandle{
-    vk::Device device_{};
+    vk::Device device{};
     vk::Image resource{};
     vk::ImageCreateInfo resInfo{};
     // vk::Image has the complication of vk::ImageView, vk::Sampler can live on its own.
@@ -121,7 +121,7 @@ struct VulkanImageHandle{
     }
     VulkanImageHandle& operator= (VulkanImageHandle &&other) noexcept {
         if (this != &other) [[likely]]{
-            device_ = other.device_;
+            device = other.device;
             resource = other.resource;
             resInfo = other.resInfo;
             view = std::move(other.view);
@@ -152,8 +152,8 @@ struct VulkanImageHandle{
         createInfo.subresourceRange.levelCount = resInfo.mipLevels;
         createInfo.subresourceRange.baseArrayLayer = 0;
         createInfo.subresourceRange.layerCount = resInfo.arrayLayers;
-        auto [result, imgView] = device_.createImageViewUnique(createInfo);
-        utils::vkEnsure(result);
+        auto [result, imgView] = device.createImageViewUnique(createInfo);
+        utils::vk_ensure(result);
         view = std::move(imgView);
     }
 };
@@ -189,7 +189,7 @@ public:
         queue_ = queueCGTP.queue;
         auto funcs = vma::VulkanFunctions{};//
         if (isThreaded){
-            std::lock_guard<std::mutex> lock(vulkanMutex);
+            std::lock_guard<std::mutex> lock(gVulkanMutex);
             funcs = vma::functionsFromDispatcher(VULKAN_HPP_DEFAULT_DISPATCHER);
         }
         else{
@@ -203,7 +203,7 @@ public:
         allocatorCreateInfo.instance = inst_;
         allocatorCreateInfo.pVulkanFunctions = &funcs;
         auto [result, alloc] = vma::createAllocatorUnique(allocatorCreateInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         alloc_ = std::move(alloc);
         allocator_ = alloc_->get();
         resCmdPool_ = CommandBufferManager{device_, {.queue = queue_, .queueFamilyIdx = queueIdxCGTP_}};
@@ -226,7 +226,7 @@ public:
         allocInfo.requiredFlags = memProps;
         vma::AllocationInfo auxInfo{};
         auto [result, buffer] = allocator_.createBufferUnique(bufferInfo, allocInfo, &auxInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         VulkanBufferMemory createdBuf{};
         createdBuf.resource = std::move(buffer.first);
         createdBuf.mem = std::move(buffer.second);
@@ -262,9 +262,9 @@ public:
         allocInfo.requiredFlags = memProps;
         vma::AllocationInfo auxInfo{};
         auto [result, image] = allocator_.createImageUnique(imageInfo, allocInfo, &auxInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         VulkanImageMemory createdImg{};
-        createdImg.device_ = device_;
+        createdImg.device = device_;
         createdImg.resource = std::move(image.first);
         createdImg.mem = std::move(image.second);
         createdImg.auxInfo = auxInfo;
@@ -301,7 +301,7 @@ public:
         copyRegions.push_back(copyRegion);
         {
             auto singleTime = cmdMgr.getSingleTimeCommandBuffer();
-            singleTime.coBuf.copyBuffer(srcBuffer, dstBuffer, copyRegions.size(), copyRegions.data());
+            singleTime.coBuf_.copyBuffer(srcBuffer, dstBuffer, copyRegions.size(), copyRegions.data());
         }
     }
     //TODO: implement async copy helper
@@ -321,7 +321,7 @@ public:
         copyRegions.push_back(copyRegion);
         {
             auto singleTime = cmdMgr.getSingleTimeCommandBuffer();
-            singleTime.coBuf.copyBufferToImage(srcBuffer, dstImage, vk::ImageLayout::eTransferDstOptimal, copyRegions);
+            singleTime.coBuf_.copyBufferToImage(srcBuffer, dstImage, vk::ImageLayout::eTransferDstOptimal, copyRegions);
         }
     }
 
@@ -346,7 +346,7 @@ public:
 
         {
             SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
-            singleTime.coBuf.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
+            singleTime.coBuf_.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
         }
     }
 
@@ -356,7 +356,7 @@ public:
 
         {
             auto singleTime = resCmdPool_.getSingleTimeCommandBuffer();
-            singleTime.coBuf.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
+            singleTime.coBuf_.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
         }
     }
     vk::UniqueSampler createTextureSampler() {
@@ -375,7 +375,7 @@ public:
         samplerInfo.compareOp = vk::CompareOp::eAlways;
         samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
         auto [result, sampler] = device_.createSamplerUnique(samplerInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         return std::move(sampler);
     }
 

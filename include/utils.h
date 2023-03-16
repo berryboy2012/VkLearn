@@ -29,13 +29,13 @@ namespace utils {
         vk::Format format;
         vk::Extent2D extent;
     };
-    VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback( VkDebugUtilsMessageSeverityFlagBitsEXT       messageSeverity,
-                                                                VkDebugUtilsMessageTypeFlagsEXT              messageTypes,
-                                                                VkDebugUtilsMessengerCallbackDataEXT const * pCallbackData,
-                                                                void * /*pUserData*/ );
-    std::vector<char> readFile(const std::string& filePath);
+    VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(VkDebugUtilsMessageSeverityFlagBitsEXT       messageSeverity,
+                                                                  VkDebugUtilsMessageTypeFlagsEXT              messageTypes,
+                                                                  VkDebugUtilsMessengerCallbackDataEXT const * pCallbackData,
+                                                                  void * /*pUserData*/ );
+    std::vector<char> read_file(const std::string& filePath);
     std::tuple<std::vector<const char*>, uint32_t> stringToVecptrU32(const std::vector<std::string> &strings);
-    inline void vkEnsure(const vk::Result &result, const std::optional<std::string> &prompt = std::nullopt);
+    inline void vk_ensure(const vk::Result &result, const std::optional<std::string> &prompt = std::nullopt);
     template <typename T>
     concept isGlmType = requires (){
         typename T::value_type;
@@ -44,7 +44,7 @@ namespace utils {
     };
     template <typename T>
     requires isGlmType<T>
-    consteval vk::Format glmTypeToFormat(){
+    consteval vk::Format glm_type_to_format(){
         if (std::is_same_v<typename T::value_type, float>){
             const auto totalSize = sizeof(T)/sizeof(typename T::value_type);
             switch (totalSize) {
@@ -57,10 +57,10 @@ namespace utils {
             }
         }
     }
-    size_t getSizeofVkFormat(vk::Format format);
-    std::vector<uint32_t> loadShaderByteCode(const std::string_view &filePath);
-    vk::UniqueShaderModule createShaderModule(const std::string_view &filePath, vk::Device &device);
-    vk::UniqueDescriptorSetLayout createDescriptorSetLayout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device);
+    size_t get_sizeof_vk_format(vk::Format format);
+    std::vector<uint32_t> load_shader_byte_code(const std::string_view &filePath);
+    vk::UniqueShaderModule create_shader_module(const std::string_view &filePath, vk::Device &device);
+    vk::UniqueDescriptorSetLayout create_descriptor_set_layout(std::span<const vk::DescriptorSetLayoutBinding> bindings, vk::Device &device);
 
     template<typename T>
     inline glm::mat<4, 4, T> vkuLookAtRH(glm::vec<3, T> const& eye, glm::vec<3, T> const& center, glm::vec<3, T> const& up)

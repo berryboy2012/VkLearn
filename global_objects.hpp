@@ -24,7 +24,7 @@
 #undef max
 #endif
 // Required by Vulkan-Hpp (https://github.com/KhronosGroup/Vulkan-Hpp#extensions--per-device-function-pointers)
-std::mutex vulkanMutex{};
+std::mutex gVulkanMutex{};
 #ifndef VK_DYNAMIC_DISPATCHER
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #define VK_DYNAMIC_DISPATCHER
@@ -37,7 +37,7 @@ struct MainRendererComm{
     std::atomic<bool> swapchainInvalid{false};
 };
 std::array<MainRendererComm, INFLIGHT_FRAMES> mainRendererComms{};
-void initializeMainSyncObjs(){
+void initialize_main_sync_objs(){
     for (auto& syncObj: mainRendererComms){
         syncObj.imageViewHandle.store({});
         syncObj.imageViewHandleAvailable.try_acquire();
@@ -45,7 +45,7 @@ void initializeMainSyncObjs(){
         syncObj.swapchainInvalid.store(false);
     }
 }
-void notifyRendererExit(){
+void notify_renderer_exit(){
     for (auto& syncObj: mainRendererComms){
         syncObj.swapchainInvalid.store(true);
     }

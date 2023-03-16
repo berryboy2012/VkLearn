@@ -116,7 +116,7 @@ public:
         renderPassInfo.pDependencies = createInfoDepends.data();
 
         auto [result, renderPass] = device_.createRenderPass2Unique(renderPassInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         pass_ = std::move(renderPass);
         renderpass_ = pass_.get();
         return renderpass_;
@@ -147,7 +147,7 @@ public:
         framebufferInfo.pAttachments = VK_NULL_HANDLE;
         framebufferInfo.pNext = &attachmentsInfo;
         auto [result, fb] = device_.createFramebufferUnique(framebufferInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         return std::move(fb);
     }
     
@@ -159,7 +159,7 @@ public:
         framebufferInfo.layers = 1;
         framebufferInfo.setAttachments(views);
         auto [result, fb] = device_.createFramebufferUnique(framebufferInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         return std::move(fb);
     }
 

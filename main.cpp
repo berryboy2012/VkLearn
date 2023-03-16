@@ -37,7 +37,7 @@ struct QueueFamilyProps {
     bool supportsSurface{};
 };
 struct PhysicalDeviceInfo {
-    vk::SurfaceKHR surface_{};// Signify which surface are those info refer to
+    vk::SurfaceKHR surface{};// Signify which surface are those info refer to
     std::vector<QueueFamilyProps> queueFamilies{};
     vk::PhysicalDeviceProperties2 props{};
     std::unordered_map<vk::Format, vk::FormatProperties2> formats{};
@@ -58,7 +58,7 @@ struct PhysicalDeviceInfo {
 #include "resource_management.hpp"
 #include "render_thread.hpp"
 
-void queryOVR() {
+void query_ovr() {
     vr::EVRInitError eError = vr::VRInitError_None;
     auto m_pHMD = vr::VR_Init(&eError, vr::VRApplication_Utility);
     auto OVRVer = m_pHMD->GetRuntimeVersion();
@@ -75,7 +75,7 @@ void queryOVR() {
 
 }
 
-SDL_Window *initSDL() {
+SDL_Window *init_sdl() {
     SDL_Init(SDL_INIT_VIDEO);
     SDL_Vulkan_LoadLibrary(nullptr);
     auto window = SDL_CreateWindow(
@@ -87,14 +87,14 @@ SDL_Window *initSDL() {
     return window;
 }
 
-void cleanSDL(SDL_Window *&window) {
+void clean_sdl(SDL_Window *&window) {
     SDL_DestroyWindow(window);
     window = nullptr;
     SDL_Vulkan_UnloadLibrary();
     SDL_Quit();
 }
 
-std::vector<std::string> getRequiredValidationLayers(bool enableValidationLayers) {
+std::vector<std::string> get_required_validation_layers(bool enableValidationLayers) {
     auto validationLayers = std::vector<std::string>{"VK_LAYER_KHRONOS_validation"};
     if (enableValidationLayers) {
         auto [layerResult, availableLayers] = vk::enumerateInstanceLayerProperties();
@@ -114,7 +114,7 @@ std::vector<std::string> getRequiredValidationLayers(bool enableValidationLayers
     return validationLayers;
 }
 
-std::vector<std::string> getRequiredInstanceExtensions(SDL_Window *window, bool enableValidationLayers) {
+std::vector<std::string> get_required_instance_extensions(SDL_Window *window, bool enableValidationLayers) {
     auto instanceExtensions = std::vector<std::string>{};
     {
         // First get extensions required by SDL
@@ -122,8 +122,8 @@ std::vector<std::string> getRequiredInstanceExtensions(SDL_Window *window, bool 
         SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, nullptr);
         auto extensionNames = std::vector<const char *>{extensionCount};
         SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, extensionNames.data());
-        for (auto p_extensionName: extensionNames) {
-            instanceExtensions.push_back(std::string(p_extensionName));
+        for (auto pExtensionName: extensionNames) {
+            instanceExtensions.push_back(std::string(pExtensionName));
         }
     }
     // We require other extensions as well
@@ -135,13 +135,13 @@ std::vector<std::string> getRequiredInstanceExtensions(SDL_Window *window, bool 
 }
 
 PhysicalDeviceInfo
-queryPhysicalDeviceInfo(const vk::PhysicalDevice chosenPhysicalDevice, vk::UniqueSurfaceKHR &surfaceSDL) {
+query_physical_device_info(const vk::PhysicalDevice chosenPhysicalDevice, vk::UniqueSurfaceKHR &surfaceSDL) {
     PhysicalDeviceInfo physicalDeviceProps{};
-    physicalDeviceProps.surface_ = surfaceSDL.get();
+    physicalDeviceProps.surface = surfaceSDL.get();
     auto queueFamilies = chosenPhysicalDevice.getQueueFamilyProperties2();
     for (size_t i = 0; i < queueFamilies.size(); ++i) {
-        auto [result, surfaceSupported] = chosenPhysicalDevice.getSurfaceSupportKHR(i, physicalDeviceProps.surface_);
-        utils::vkEnsure(result);
+        auto [result, surfaceSupported] = chosenPhysicalDevice.getSurfaceSupportKHR(i, physicalDeviceProps.surface);
+        utils::vk_ensure(result);
         auto queueFamilyProp = QueueFamilyProps{
                 .props = queueFamilies[i],
                 .supportsSurface = static_cast<bool>(surfaceSupported)};
@@ -154,20 +154,20 @@ queryPhysicalDeviceInfo(const vk::PhysicalDevice chosenPhysicalDevice, vk::Uniqu
     }
     auto result = vk::Result{};
     std::tie(result, physicalDeviceProps.surfaceCaps) = chosenPhysicalDevice.getSurfaceCapabilities2KHR(
-            physicalDeviceProps.surface_);
-    utils::vkEnsure(result);
+            physicalDeviceProps.surface);
+    utils::vk_ensure(result);
     std::tie(result, physicalDeviceProps.surfaceFmts) = chosenPhysicalDevice.getSurfaceFormats2KHR(
-            physicalDeviceProps.surface_);
-    utils::vkEnsure(result);
+            physicalDeviceProps.surface);
+    utils::vk_ensure(result);
     std::tie(result, physicalDeviceProps.surfacePres) = chosenPhysicalDevice.getSurfacePresentModesKHR(
-            physicalDeviceProps.surface_);
-    utils::vkEnsure(result);
+            physicalDeviceProps.surface);
+    utils::vk_ensure(result);
     return physicalDeviceProps;
 }
 
 //TODO: add extension query for OpenVR
 //Remember, most extensions require respective features to work
-std::vector<std::string> getRequiredDeviceExtensions() {
+std::vector<std::string> get_required_device_extensions() {
     std::vector<std::string> requiredDeviceExtensions{
             VK_KHR_SWAPCHAIN_EXTENSION_NAME,
             // We want robust interaction with window subsystem (in the future, as device support is non-existent ATM)
@@ -193,7 +193,7 @@ std::vector<std::string> getRequiredDeviceExtensions() {
 
 // A jank way to store a linked list of VkPhysDevFeatures, the first element can be retrieved by std::any_cast<vk::PhysicalDeviceFeatures2&>.
 // Should use vk::StructureChain instead. The returned list is not copy-able!
-std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &device) {
+std::vector<std::any> get_required_device_features_2(const vk::PhysicalDevice &device) {
     using Feature2 = vk::PhysicalDeviceFeatures2;
     // https://vulkan.lunarg.com/doc/view/1.3.239.0/windows/1.3-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pNext-02829
     using Vulkan11 = vk::PhysicalDeviceVulkan11Features;
@@ -243,8 +243,8 @@ std::vector<std::any> getRequiredDeviceFeatures2(const vk::PhysicalDevice &devic
     return featureList;
 }
 
-vk::UniqueInstance createVulkanInstance(const std::vector<std::string> &validationLayers,
-                                        const std::vector<std::string> &instanceExtensions) {
+vk::UniqueInstance create_vulkan_instance(const std::vector<std::string> &validationLayers,
+                                          const std::vector<std::string> &instanceExtensions) {
     auto appInfo = vk::ApplicationInfo(
             "VkLearn",
             VK_MAKE_VERSION(1, 0, 0),
@@ -275,11 +275,11 @@ vk::UniqueInstance createVulkanInstance(const std::vector<std::string> &validati
     createInfo.ppEnabledExtensionNames = pExtensionNames.data();
 
     auto [result, vkUniqueInstance] = vk::createInstanceUnique(createInfo, nullptr);
-    utils::vkEnsure(result);
+    utils::vk_ensure(result);
     return std::move(vkUniqueInstance);
 }
 
-vk::UniqueDebugUtilsMessengerEXT createVulkanDebugMsg(const vk::Instance &vkInstance) {
+vk::UniqueDebugUtilsMessengerEXT create_vulkan_debug_msg(const vk::Instance &vkInstance) {
     using SeverityBits = vk::DebugUtilsMessageSeverityFlagBitsEXT;
     using MsgTypeBits = vk::DebugUtilsMessageTypeFlagBitsEXT;
 
@@ -288,7 +288,7 @@ vk::UniqueDebugUtilsMessengerEXT createVulkanDebugMsg(const vk::Instance &vkInst
             SeverityBits::eWarning | SeverityBits::eError, // | SeverityBits::eInfo | SeverityBits::eVerbose,
             MsgTypeBits::eGeneral | MsgTypeBits::ePerformance | MsgTypeBits::eValidation |
             MsgTypeBits::eDeviceAddressBinding,
-            &utils::debugUtilsMessengerCallback
+            &utils::debug_utils_messenger_callback
     };
 
     auto [debugResult, debugUtilsMessengerUnique] = vkInstance.createDebugUtilsMessengerEXTUnique(createInfo);
@@ -296,9 +296,9 @@ vk::UniqueDebugUtilsMessengerEXT createVulkanDebugMsg(const vk::Instance &vkInst
 
 }
 
-vk::PhysicalDevice getPhysicalDevice(const vk::Instance &vkInstance) {
+vk::PhysicalDevice get_physical_device(const vk::Instance &vkInstance) {
     auto [resultDevices, devices] = vkInstance.enumeratePhysicalDevices();
-    utils::vkEnsure(resultDevices);
+    utils::vk_ensure(resultDevices);
     auto chosenPhysicalDevice = vk::PhysicalDevice{};
     for (const auto &device: devices) {
         auto devProperty = device.getProperties2();
@@ -308,7 +308,7 @@ vk::PhysicalDevice getPhysicalDevice(const vk::Instance &vkInstance) {
     return chosenPhysicalDevice;
 }
 
-vk::UniqueSurfaceKHR createSurfaceSDL(SDL_Window *p_SDLWindow, const vk::Instance &vkInstance) {
+vk::UniqueSurfaceKHR create_surface_sdl(SDL_Window *p_SDLWindow, const vk::Instance &vkInstance) {
     VkSurfaceKHR tmpSurface{};
     if (SDL_Vulkan_CreateSurface(p_SDLWindow, vkInstance, &tmpSurface) != SDL_TRUE) {
         std::abort();
@@ -317,7 +317,7 @@ vk::UniqueSurfaceKHR createSurfaceSDL(SDL_Window *p_SDLWindow, const vk::Instanc
     return std::move(surface);
 }
 
-vk::Format findQualifiedDepthFormat(const PhysicalDeviceInfo &physicalDeviceProps) {
+vk::Format find_qualified_depth_format(const PhysicalDeviceInfo &physicalDeviceProps) {
     std::array<vk::Format, 3> depthCandidates = {
             vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint};
     std::array<std::tuple<vk::ImageTiling, vk::FormatFeatureFlags>, 1> tilingReqs{{
@@ -346,7 +346,7 @@ vk::Format findQualifiedDepthFormat(const PhysicalDeviceInfo &physicalDeviceProp
     std::abort();
 }
 
-bool wantExitSDL() {
+bool want_exit_sdl() {
     SDL_Event sdlEvent;
     static bool bRet = false;
 
@@ -363,7 +363,7 @@ bool wantExitSDL() {
     return bRet;
 }
 
-std::optional<uint32_t> findQualifiedQueueFamily(const PhysicalDeviceInfo &physicalDeviceProps, size_t numQueues) {
+std::optional<uint32_t> find_qualified_queue_family(const PhysicalDeviceInfo &physicalDeviceProps, size_t numQueues) {
     using QFlgs = vk::QueueFlagBits;
     auto queueFlags = QFlgs::eTransfer | QFlgs::eGraphics | QFlgs::eCompute;
     for (size_t i = 0; i < physicalDeviceProps.queueFamilies.size(); i++) {
@@ -379,9 +379,9 @@ std::optional<uint32_t> findQualifiedQueueFamily(const PhysicalDeviceInfo &physi
 }
 
 vk::UniqueDevice
-createVulkanDevice(const vk::PhysicalDevice &chosenPhysicalDevice,
-                   const std::vector<std::any> &featureList, const std::vector<std::string> &deviceExtensions,
-                   uint32_t queueCGTPIdx, size_t numQueues) {
+create_vulkan_device(const vk::PhysicalDevice &chosenPhysicalDevice,
+                     const std::vector<std::any> &featureList, const std::vector<std::string> &deviceExtensions,
+                     uint32_t queueCGTPIdx, size_t numQueues) {
     auto queuePriorities = std::vector<float>(numQueues, 1.0f);
     auto queueCreateInfo = vk::DeviceQueueCreateInfo{};
     queueCreateInfo.queueFamilyIndex = queueCGTPIdx;
@@ -400,11 +400,11 @@ createVulkanDevice(const vk::PhysicalDevice &chosenPhysicalDevice,
     createInfo.ppEnabledExtensionNames = vecPtrDeviceExtension.data();
 
     auto [result, logicDevice] = chosenPhysicalDevice.createDeviceUnique(createInfo);
-    utils::vkEnsure(result);
+    utils::vk_ensure(result);
     return std::move(logicDevice);
 }
 
-vk::Extent2D getSurfaceSize(SDL_Window *p_SDLWindow) {
+vk::Extent2D get_surface_size(SDL_Window *p_SDLWindow) {
     auto surfaceExtent = vk::Extent2D{};
     int width, height;
     SDL_Vulkan_GetDrawableSize(p_SDLWindow, &width, &height);
@@ -413,7 +413,7 @@ vk::Extent2D getSurfaceSize(SDL_Window *p_SDLWindow) {
     return surfaceExtent;
 }
 
-vk::SurfaceFormat2KHR findQualifiedSurfaceFormat2(const std::span<const vk::SurfaceFormat2KHR> surfaceFormats2) {
+vk::SurfaceFormat2KHR find_qualified_surface_format_2(const std::span<const vk::SurfaceFormat2KHR> surfaceFormats2) {
     vk::SurfaceFormat2KHR surfaceFormat2{};
     auto preferredFmt = vk::Format::eB8G8R8A8Unorm;
     auto preferredColor = vk::ColorSpaceKHR::eSrgbNonlinear;
@@ -432,7 +432,7 @@ vk::SurfaceFormat2KHR findQualifiedSurfaceFormat2(const std::span<const vk::Surf
     return surfaceFormat2;
 }
 
-vk::PresentModeKHR findQualifiedPresentMode(const std::span<const vk::PresentModeKHR> surfacePresentModes) {
+vk::PresentModeKHR find_qualified_present_mode(const std::span<const vk::PresentModeKHR> surfacePresentModes) {
     vk::PresentModeKHR presentMode{};
     {
         vk::PresentModeKHR preferredMode = vk::PresentModeKHR::eFifo;//Relaxed;
@@ -450,10 +450,10 @@ vk::PresentModeKHR findQualifiedPresentMode(const std::span<const vk::PresentMod
 }
 
 // oldSwapchain will be retired but not destroyed
-vk::UniqueSwapchainKHR createSwapchain(vk::Device device, vk::PhysicalDevice physicalDevice,
-                                       const vk::Extent2D &surfaceExtent, const vk::SurfaceFormat2KHR &surfaceFormat2,
-                                       vk::PresentModeKHR presentMode, uint32_t imageCount,
-                                       vk::SurfaceKHR surface, vk::SwapchainKHR oldSwapchain = {}) {
+vk::UniqueSwapchainKHR create_swapchain(vk::Device device, vk::PhysicalDevice physicalDevice,
+                                        const vk::Extent2D &surfaceExtent, const vk::SurfaceFormat2KHR &surfaceFormat2,
+                                        vk::PresentModeKHR presentMode, uint32_t imageCount,
+                                        vk::SurfaceKHR surface, vk::SwapchainKHR oldSwapchain = {}) {
 
     auto surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface).value;
     vk::Extent2D extent{};
@@ -487,7 +487,7 @@ vk::UniqueSwapchainKHR createSwapchain(vk::Device device, vk::PhysicalDevice phy
     createInfo.clipped = true;
     createInfo.oldSwapchain = oldSwapchain;
     auto [result, swapchain] = device.createSwapchainKHRUnique(createInfo);
-    utils::vkEnsure(result, "swapchain creation failed");
+    utils::vk_ensure(result, "swapchain creation failed");
     return std::move(swapchain);
 }
 
@@ -516,42 +516,42 @@ int main(int argc, char *argv[]) {
     auto vkGetInstanceProcAddr = dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
     VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
     // Setup SDL2
-    auto p_SDLWindow = initSDL();
+    auto p_SDLWindow = init_sdl();
     // Instance for Vulkan
-    auto validationLayers = getRequiredValidationLayers(bDebug);
-    auto instanceExtensions = getRequiredInstanceExtensions(p_SDLWindow, bDebug);
-    auto instance = createVulkanInstance(validationLayers, instanceExtensions);
+    auto validationLayers = get_required_validation_layers(bDebug);
+    auto instanceExtensions = get_required_instance_extensions(p_SDLWindow, bDebug);
+    auto instance = create_vulkan_instance(validationLayers, instanceExtensions);
     // Setup DynamicLoader (instance-wide)
     VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.get());
     if (bDebug) {
-        auto vkDebugUtilMsg = createVulkanDebugMsg(instance.get());
+        auto vkDebugUtilMsg = create_vulkan_debug_msg(instance.get());
     }
 
-    auto chosenPhysicalDevice = getPhysicalDevice(instance.get());
+    auto chosenPhysicalDevice = get_physical_device(instance.get());
     // SDL2's surface
-    auto surfaceSDL = createSurfaceSDL(p_SDLWindow, instance.get());
-    auto physicalDeviceProps = queryPhysicalDeviceInfo(chosenPhysicalDevice, surfaceSDL);
+    auto surfaceSDL = create_surface_sdl(p_SDLWindow, instance.get());
+    auto physicalDeviceProps = query_physical_device_info(chosenPhysicalDevice, surfaceSDL);
 
-    auto featureList = getRequiredDeviceFeatures2(chosenPhysicalDevice);
-    auto deviceExtensions = getRequiredDeviceExtensions();
+    auto featureList = get_required_device_features_2(chosenPhysicalDevice);
+    auto deviceExtensions = get_required_device_extensions();
     auto device = vk::UniqueDevice{};
     size_t numQueues = INFLIGHT_FRAMES + 1;// One for global commands, rest for the renderers.
     uint32_t queueFamilyIndex{};
     {
-        auto queueFamIdx = findQualifiedQueueFamily(physicalDeviceProps, numQueues);
+        auto queueFamIdx = find_qualified_queue_family(physicalDeviceProps, numQueues);
         if (!queueFamIdx.has_value()) {
             std::abort();
         }
         queueFamilyIndex = queueFamIdx.value();
     }
-    device = createVulkanDevice(chosenPhysicalDevice, featureList, deviceExtensions, queueFamilyIndex, numQueues);
+    device = create_vulkan_device(chosenPhysicalDevice, featureList, deviceExtensions, queueFamilyIndex, numQueues);
     // Setup DynamicLoader (device-wide)
     VULKAN_HPP_DEFAULT_DISPATCHER.init(device.get());
-    auto swapchainFormat = findQualifiedSurfaceFormat2(physicalDeviceProps.surfaceFmts);
-    auto swapchainPresentMode = findQualifiedPresentMode(physicalDeviceProps.surfacePres);
-    auto depthFormat = findQualifiedDepthFormat(physicalDeviceProps);
+    auto swapchainFormat = find_qualified_surface_format_2(physicalDeviceProps.surfaceFmts);
+    auto swapchainPresentMode = find_qualified_present_mode(physicalDeviceProps.surfacePres);
+    auto depthFormat = find_qualified_depth_format(physicalDeviceProps);
 
-    bool exitSignal = wantExitSDL();
+    bool exitSignal = want_exit_sdl();
     auto swapchain = vk::UniqueSwapchainKHR{};
     uint64_t frameId = 0;
     SDL_StartTextInput();
@@ -565,20 +565,20 @@ int main(int argc, char *argv[]) {
         swapchainImageCount = std::clamp(swapchainImageCount,
                                          physicalDeviceProps.surfaceCaps.surfaceCapabilities.minImageCount,
                                          physicalDeviceProps.surfaceCaps.surfaceCapabilities.maxImageCount);
-        auto surfaceExtent = getSurfaceSize(p_SDLWindow);
-        swapchain = createSwapchain(device.get(), chosenPhysicalDevice,
-                                    surfaceExtent, swapchainFormat, swapchainPresentMode, swapchainImageCount,
-                                    surfaceSDL.get(), swapchain.get());
+        auto surfaceExtent = get_surface_size(p_SDLWindow);
+        swapchain = create_swapchain(device.get(), chosenPhysicalDevice,
+                                     surfaceExtent, swapchainFormat, swapchainPresentMode, swapchainImageCount,
+                                     surfaceSDL.get(), swapchain.get());
         size_t globalQueueIndex = INFLIGHT_FRAMES;
         auto globalQueue = utils::QueueStruct{.queue = device->getQueue(queueFamilyIndex,
                                                                         globalQueueIndex), .queueFamilyIdx = queueFamilyIndex};
         auto swapchainImagenViews = std::vector<VulkanImageHandle>{};
         {
             auto [result, imgs] = device->getSwapchainImagesKHR(swapchain.get());
-            utils::vkEnsure(result);
+            utils::vk_ensure(result);
             for (const auto &img: imgs) {
                 VulkanImageHandle imgHandle{};
-                imgHandle.device_ = device.get();
+                imgHandle.device = device.get();
                 imgHandle.resource = img;
                 imgHandle.resInfo.mipLevels = 1;
                 imgHandle.resInfo.arrayLayers = 1;
@@ -602,16 +602,16 @@ int main(int argc, char *argv[]) {
         auto imageAvailableSemaphores = std::vector<vk::UniqueSemaphore>{};
         for (size_t i = 0; i < INFLIGHT_FRAMES; ++i) {
             auto [result, sema] = device->createSemaphoreUnique({});
-            utils::vkEnsure(result);
+            utils::vk_ensure(result);
             imageAvailableSemaphores.push_back(std::move(sema));
         }
         auto renderCompleteSemaphores = std::vector<vk::UniqueSemaphore>{};
         for (size_t i = 0; i < INFLIGHT_FRAMES; ++i) {
             auto [result, sema] = device->createSemaphoreUnique({});
-            utils::vkEnsure(result);
+            utils::vk_ensure(result);
             renderCompleteSemaphores.push_back(std::move(sema));
         }
-        initializeMainSyncObjs();
+        initialize_main_sync_objs();
         auto rendererSwapchainImageIndices = std::array<uint32_t, INFLIGHT_FRAMES>{};
         /* Renderer need the following global handles for initialization:
          * vk::Instance, vk::PhysicalDevice,
@@ -626,7 +626,7 @@ int main(int argc, char *argv[]) {
         frameId += 1;
         for (size_t threadIdx = 0; threadIdx < INFLIGHT_FRAMES; ++threadIdx) {
             renderThreads[threadIdx] = std::thread{
-                    renderWorkThread,
+                    render_work_thread,
                     threadIdx,
                     instance.get(), chosenPhysicalDevice, physicalDeviceProps, device.get(),
                     queueFamilyIndex,
@@ -639,7 +639,7 @@ int main(int argc, char *argv[]) {
         // Begin rendering loop
         std::cout<<"MAIN: Looping...\n"<<std::endl;
         while (!resetSwapchain & !exitSignal) {
-            exitSignal |= wantExitSDL();
+            exitSignal |= want_exit_sdl();
 
             /* During rendering loop, the main thread should orchestrate the following things:
              * Check whether surface size is changed
@@ -683,7 +683,7 @@ int main(int argc, char *argv[]) {
                 resetSwapchain = true;
                 continue;
             } else if (result != vk::Result::eSuboptimalKHR) {
-                utils::vkEnsure(result);
+                utils::vk_ensure(result);
             }
 
             mainRendererComms[currentRenderer].imageViewHandle.store(swapchainImagenViews[imageIndex].view.get());
@@ -698,7 +698,7 @@ int main(int argc, char *argv[]) {
                     break;
                 } else {
                     std::cout << std::format("Renderer {} is lagging!\n", nextRenderer) << std::endl;
-                    exitSignal = wantExitSDL();
+                    exitSignal = want_exit_sdl();
                 }
             }
             if (!isFirstLoop) {
@@ -718,7 +718,7 @@ int main(int argc, char *argv[]) {
                 if (resultPresent == vk::Result::eErrorOutOfDateKHR || resultPresent == vk::Result::eSuboptimalKHR) {
                     resetSwapchain = true;
                 } else {
-                    utils::vkEnsure(resultPresent);
+                    utils::vk_ensure(resultPresent);
                 }
             }
             currentRenderer = (currentRenderer + 1) % INFLIGHT_FRAMES;
@@ -736,7 +736,7 @@ int main(int argc, char *argv[]) {
              * After all rendering threads are terminated, the main thread can start its reset procedure.
              * */
         }// Out of rendering loop, prepare to reset resources
-        notifyRendererExit();
+        notify_renderer_exit();
         for (auto &renderer: renderThreads) {
             renderer.join();
         }
@@ -746,15 +746,15 @@ int main(int argc, char *argv[]) {
                 // Wait until surface size is valid for rendering
                 bool isSurfaceZeroSize;
                 do {
-                    surfaceExtent = getSurfaceSize(p_SDLWindow);
+                    surfaceExtent = get_surface_size(p_SDLWindow);
                     if (surfaceExtent.width * surfaceExtent.height == 0) {
                         isSurfaceZeroSize = true;
                     } else {
                         isSurfaceZeroSize = false;
                     }
-                    exitSignal = wantExitSDL();
+                    exitSignal = want_exit_sdl();
                 } while (!exitSignal & isSurfaceZeroSize);
-                utils::vkEnsure(device->waitIdle());
+                utils::vk_ensure(device->waitIdle());
                 // We only need to explicitly destroy swapchain's ImageViews
                 swapchainImagenViews.clear();
             } else {
@@ -762,10 +762,10 @@ int main(int argc, char *argv[]) {
             }
         }
         // Workaround for the lack of VK_EXT_swapchain_maintenance1 support
-        utils::vkEnsure(device->waitIdle());
+        utils::vk_ensure(device->waitIdle());
     }
     // End of rendering, clean up
-    utils::vkEnsure(device->waitIdle());
-    cleanSDL(p_SDLWindow);
+    utils::vk_ensure(device->waitIdle());
+    clean_sdl(p_SDLWindow);
     return 0;
 }

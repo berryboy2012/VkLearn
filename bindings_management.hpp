@@ -64,7 +64,7 @@ public:
         poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
 
         auto [result, descriptorPool] = device_.createDescriptorPoolUnique(poolInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         pool_ = std::move(descriptorPool);
         descriptorPool_ = pool_.get();
     }
@@ -76,7 +76,7 @@ public:
         allocInfo.pSetLayouts = layouts.data();
 
         auto [result, descriptorSets] = device_.allocateDescriptorSetsUnique(allocInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         return std::move(descriptorSets);
     }
 
@@ -86,7 +86,7 @@ public:
         allocInfo.setSetLayouts(layout);
 
         auto [result, descriptorSets] = device_.allocateDescriptorSetsUnique(allocInfo);
-        utils::vkEnsure(result);
+        utils::vk_ensure(result);
         return std::move(descriptorSets[0]);
     }
 
