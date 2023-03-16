@@ -339,4 +339,50 @@ private:
     vk::UniquePipeline pipe_{};
     vk::Device device_{};
 };
+
+// Also helps building a pipeline
+// The twisted Vulkan API requires that a Pipeline object must be tied to a Renderpass object upon creation
+// Thus the creation of vk::Pipeline object has to be postponed to much later
+class SubpassFactory{
+public:
+    explicit SubpassFactory(vk::Device device){
+        device_ = device;
+    }
+/* Things needed to be done in terms of pipeline:
+    VkPipelineCreateFlags                            flags;
+    // Shader related
+    uint32_t                                         stageCount;
+    const VkPipelineShaderStageCreateInfo*           pStages;
+    // Provided by vertex shader
+    const VkPipelineVertexInputStateCreateInfo*      pVertexInputState;
+    const VkPipelineInputAssemblyStateCreateInfo*    pInputAssemblyState;
+    // No tessel shader for now
+    const VkPipelineTessellationStateCreateInfo*     pTessellationState;
+    // Renderpass level, as it shares props with framebuffer
+    const VkPipelineViewportStateCreateInfo*         pViewportState;
+    // Subpass level
+    const VkPipelineRasterizationStateCreateInfo*    pRasterizationState;
+    // No MSAA for now
+    const VkPipelineMultisampleStateCreateInfo*      pMultisampleState;
+    // Fragment shader level
+    const VkPipelineDepthStencilStateCreateInfo*     pDepthStencilState;
+    const VkPipelineColorBlendStateCreateInfo*       pColorBlendState;
+    // Subpass level
+    const VkPipelineDynamicStateCreateInfo*          pDynamicState;
+    VkPipelineLayout                                 layout;
+    // Renderpass level
+    VkRenderPass                                     renderPass;
+    uint32_t                                         subpass;
+    // Don't implement for now
+    VkPipeline                                       basePipelineHandle;
+    int32_t                                          basePipelineIndex;
+ * */
+
+
+/* For a subpass:
+ *
+ * */
+private:
+    vk::Device device_{};
+};
 #endif //VKLEARN_GRAPHICS_PIPELINE_HPP

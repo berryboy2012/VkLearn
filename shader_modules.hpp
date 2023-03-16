@@ -643,7 +643,7 @@ public:
 
 class FragmentShaderBase : public ShaderBase {
 public:
-    SubpassAttachmentReferences attachmentReferences_{};
+    vk::PipelineDepthStencilStateCreateInfo depthStencilInfo_{};
 };
 
 class FragmentShaderFactory {
@@ -684,6 +684,11 @@ public:
         shader.shaderModule_ = utils::create_shader_module(filePath, device_);
         shader.descriptors_ = shader::parse_descriptors(shader.irCode_, vk::ShaderStageFlagBits::eFragment);
         shaderParsedAttachmentInfo_[shaderIdx] = parseAttachments(shader);
+        shader.depthStencilInfo_.depthTestEnable = true;
+        shader.depthStencilInfo_.depthWriteEnable = true;
+        shader.depthStencilInfo_.depthCompareOp = vk::CompareOp::eGreater;
+        shader.depthStencilInfo_.depthBoundsTestEnable = false;
+        shader.depthStencilInfo_.stencilTestEnable = false;
     }
 
     void setAttachmentProperties(ShaderIdx shaderIdx, const std::string& variableName,
@@ -691,6 +696,20 @@ public:
         auto &attach = shaderParsedAttachmentInfo_.at(shaderIdx).at(variableName);
         attach.attachRef.aspectMask = aspects;
         attach.attachRef.layout = layout;
+    }
+
+    std::tuple<vk::PipelineColorBlendStateCreateInfo, std::unordered_map<std::string, vk::PipelineColorBlendAttachmentState>>
+    getColorBlendInfo(ShaderIdx shaderIdx){
+        auto &shader = shaders_.at(shaderIdx);
+        std::unordered_map<std::string, vk::PipelineColorBlendAttachmentState> colors{};
+        for (const auto& attach: shaderParsedAttachmentInfo_.at(shaderIdx)){
+            colors[attach.first] = attach.second.blendInfo;
+        }
+        vk::PipelineColorBlendStateCreateInfo createInfo{};
+        createInfo.logicOpEnable = false;
+        createInfo.logicOp = vk::LogicOp::eCopy;
+        createInfo.blendConstants = {{ 0.0f,0.0f,0.0f,0.0f }};
+        return std::make_tuple(createInfo, colors);
     }
 
 private:
@@ -714,6 +733,7 @@ private:
         InAttachIdx inputAttachIdx{};
         // Color attachment only
         LocIdx location{};
+        vk::PipelineColorBlendAttachmentState blendInfo{};
     };
     std::map<ShaderIdx, std::unordered_map<std::string, AttachmentParsedInfo>> shaderParsedAttachmentInfo_{};
     // Very little Vulkan API related info can be parsed from shader code
@@ -740,6 +760,11 @@ private:
             attachInfo.attachRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
             attachInfo.attachRef.aspectMask = vk::ImageAspectFlagBits::eColor;
             attachInfo.location = glsl.get_decoration(colorAttach.id, spv::DecorationLocation);
+            // No custom settings for now
+            attachInfo.blendInfo.blendEnable = false;
+            attachInfo.blendInfo.colorWriteMask =
+                    vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
+                    vk::ColorComponentFlagBits::eA;
             attaches[colorAttach.name] = attachInfo;
         }
         // Depth attachment is implicit.
