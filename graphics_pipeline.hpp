@@ -360,7 +360,7 @@ public:
     const VkPipelineTessellationStateCreateInfo*     pTessellationState;
     // Renderpass level, as it shares props with framebuffer
     const VkPipelineViewportStateCreateInfo*         pViewportState;
-    // Subpass level
+    // Provided by vertex shader
     const VkPipelineRasterizationStateCreateInfo*    pRasterizationState;
     // No MSAA for now
     const VkPipelineMultisampleStateCreateInfo*      pMultisampleState;

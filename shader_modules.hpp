@@ -621,29 +621,149 @@ struct VertexInputBindingTable {
     vk::VertexInputBindingDescription bindingDescription{};
     std::vector<vk::VertexInputAttributeDescription> attributesDescription{};
 };
-
+// General rules about what goes where:
+//  Classes have direct counterparts in Vulkan should be able to spit out related Vulkan API info themselves
+//  Those instances should be 'immutable' outside of related Factory classes
+//  Infos that can be finalized at current level but unrelated to Vulkan's counterpart shouldn't stay at factories.
+//  But should be visible to related factory classes.
+//  By finalized at current level, we mean the following preconditions:
+//    1. All resource info are already known
+//    2. No forms of resource aliased modification are possible at higher levels (up to renderpass)
+//   By those two rules, things like binding vertex input attributes with host data structures is allowed to stay at
+//   shader level, while binding attachment references with attachments must stay at renderpass level.
+//  For information that can only be partially filled at current level, the factories are responsible to propagate the
+//  info to high levels, however, only higher levels are responsible for filling the remaining info.
+//  The incomplete info shouldn't be kept inside factories.
+//
+//  Due to intertwined nature of Vulkan API, they can only be released from factories after nearly
+//  all levels of info are filled. Also, the public side of non-factory classes merely serves as an interface for inspection.
+// For factory classes, things are layered. Again constrained by Vulkan's hierarchy, higher-level factories have to hold
+// handles of lower-level factory instances. Factory classes should only have methods that set information 'known' at
+// their respective layers. Which means there will be lots of things in the top few levels.
+// Giving out usable Vulkan API information shouldn't be factories' job. (By usable we mean no modification needed)
 class ShaderBase {
 public:
-    using DescSetIdx = shader::DescSetIdx;
+    vk::ShaderModule getShaderModule(){
+        if (!shaderModule_.get()){
+            auto [result, shaderModule] = device_.createShaderModuleUnique({vk::ShaderModuleCreateFlags(),
+                                                                            irCode_.size()*sizeof(decltype(irCode_)::value_type),
+                                                                            irCode_.data()});
+            utils::vk_ensure(result, "create_shader_module() failed");
+            shaderModule_ = std::move(shaderModule);
+        }
+        return shaderModule_.get();
+    }
+    explicit ShaderBase(vk::Device device){
+        device_ = device;
+    }
+    ShaderBase() = default;
+protected:
+    // Methods for getting usable Vulkan API info
+    [[nodiscard]] std::string getEntryPointName() const{
+        return entryPoint_;
+    }
+    // Incomplete info, will be propagated to higher levels
     using BindIdx = shader::BindIdx;
     using ShaderDescriptorInfo = shader::ShaderDescriptorInfo;
-    vk::UniqueShaderModule shaderModule_{};
     std::unordered_map<std::string, ShaderDescriptorInfo> descriptors_{};
-    // Other info
-    std::string name_{};
+    // Info modified by current level factories only
     std::vector<uint32_t> irCode_{};
+    std::string name_{};
+    std::string entryPoint_{};
+private:
+    vk::Device device_{};
+    vk::UniqueShaderModule shaderModule_{};
 };
 
 class VertexShaderBase : public ShaderBase {
 public:
-    // Specific to vertex shaders
-    std::unordered_map<BindIdx, VertexInputBindingTable> inputBindTables_{};
+    explicit VertexShaderBase(vk::Device device) : ShaderBase(device) {}
+    VertexShaderBase() = default;
+protected:
+    // Methods for getting usable Vulkan API info
+    [[nodiscard]] vk::PipelineInputAssemblyStateCreateInfo getInputAssemblyInfo() const{
+        return inputAsmInfo_;
+    }
+    [[nodiscard]] vk::PipelineRasterizationStateCreateInfo getRasterizationInfo() const{
+        return rasterizationInfo_;
+    }
+    // For Vulkan API info that involves pointers, we introduce a two-step process: first store getFooData(), then call getFoo()
+    // The type of valued return by getFooData() is implementation-defined.
+    [[nodiscard]] std::tuple<vk::PipelineVertexInputStateCreateInfo,
+    std::vector<vk::VertexInputBindingDescription>, std::vector<vk::VertexInputAttributeDescription>> getVertexInputInfoData() const{
+        vk::PipelineVertexInputStateCreateInfo inputInfo{};
+        std::vector<vk::VertexInputBindingDescription> inputTables{inputBindTables_.size()};
+        std::vector<vk::VertexInputAttributeDescription> inputAttrs{};
+        for (const auto& table: inputBindTables_){
+            inputTables[table.first] = table.second.bindingDescription;
+            for (const auto& attr: table.second.attributesDescription){
+                inputAttrs.push_back(attr);
+            }
+        }
+        return std::make_tuple(inputInfo, inputTables, inputAttrs);
+    }
+    static vk::PipelineVertexInputStateCreateInfo getVertexInputInfo(
+            const std::tuple<vk::PipelineVertexInputStateCreateInfo,
+                    std::vector<vk::VertexInputBindingDescription>, std::vector<vk::VertexInputAttributeDescription>>& data){
+        auto result = std::get<0>(data);
+        result.setVertexBindingDescriptions(std::get<1>(data));
+        result.setVertexAttributeDescriptions(std::get<2>(data));
+        return result;
+    }
+    // Incomplete info, will be propagated to higher levels
+    struct VertexInputAttrParsedInfo {
+        // We need more info to deal with GLSL's unintuitive rules
+        // https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap22.html#fxvertex-attrib-location
+        uint32_t startLocation;
+        uint32_t multiplier;
+        vk::Format format;
+        uint32_t fmtBaseCompByteSize;
+    };
+    std::unordered_map<std::string, VertexInputAttrParsedInfo> parsedVertexInputInfo_{};
+    // Info modified by current level factories only
+    std::map<BindIdx, VertexInputBindingTable> inputBindTables_{};
     vk::PipelineInputAssemblyStateCreateInfo inputAsmInfo_{};
+    vk::PipelineRasterizationStateCreateInfo rasterizationInfo_{};
+private:
+    friend class VertexShaderFactory;
 };
 
 class FragmentShaderBase : public ShaderBase {
 public:
+    explicit FragmentShaderBase(vk::Device device): ShaderBase(device) {}
+    FragmentShaderBase() = default;
+protected:
+    // Methods for getting usable Vulkan API info
+    [[nodiscard]] vk::PipelineDepthStencilStateCreateInfo getDepthStencilInfo() const{
+        return depthStencilInfo_;
+    }
+    // Incomplete info, will be propagated to higher levels
+    using LocIdx = shader::LocIdx;
+    enum class AttachmentType {
+        //TODO: add support for preserveAttachments
+        eUnknown = 0,
+        eInput= 1,
+        eColor = 2,
+        eResolve = 3,
+        eDepthStencil = 4
+    };
+    struct AttachmentParsedInfo {
+        // Polymorphism through enum, yay
+        AttachmentType attachType{};
+        vk::AttachmentReference2 attachRef{};
+        // Input attachment only
+        typedef uint32_t InAttachIdx;
+        InAttachIdx inputAttachIdx{};
+        // Color attachment only
+        LocIdx location{};
+        vk::PipelineColorBlendAttachmentState blendInfo{};
+    };
+    std::unordered_map<std::string, AttachmentParsedInfo> parsedAttachmentInfo_{};
+    vk::PipelineColorBlendStateCreateInfo colorBlendInfo_{};
+    // Info modified by current level factories only
     vk::PipelineDepthStencilStateCreateInfo depthStencilInfo_{};
+private:
+    friend class FragmentShaderFactory;
 };
 
 class FragmentShaderFactory {
@@ -659,10 +779,11 @@ public:
 
     ShaderIdx registerShader(const std::string_view shaderName) {
         ShaderIdx index = shaders_.empty() ? 0 : shaders_.rbegin()->first + 1;
-        shaders_[index] = {};
-        shaders_[index].name_ = shaderName;
+        FragmentShaderBase shader{device_};
+        shader.name_ = shaderName;
         std::string nameStr{shaderName};
         shaderLUT_[nameStr] = index;
+        shaders_.emplace(std::make_pair(index, std::move(shader)));
         return index;
     }
 
@@ -672,18 +793,22 @@ public:
             std::swap(shaders_.at(index), result);
             shaders_.erase(index);
             shaderLUT_.erase(result.name_);
-            shaderParsedAttachmentInfo_.erase(index);
             return result;
         }
         std::abort();
     }
 
-    void loadShaderModule(ShaderIdx shaderIdx, const std::string_view filePath) {
+    void loadShaderModule(ShaderIdx shaderIdx, const std::string_view filePath, const std::string &entryPointName) {
         auto &shader = shaders_.at(shaderIdx);
         shader.irCode_ = utils::load_shader_byte_code(filePath);
-        shader.shaderModule_ = utils::create_shader_module(filePath, device_);
+        shader.entryPoint_ = entryPointName;
         shader.descriptors_ = shader::parse_descriptors(shader.irCode_, vk::ShaderStageFlagBits::eFragment);
-        shaderParsedAttachmentInfo_[shaderIdx] = parseAttachments(shader);
+        shader.parsedAttachmentInfo_ = parseAttachments(shader);
+    }
+
+    void setDepthStencilInfo(ShaderIdx shaderIdx){
+        // Hard-code for now
+        auto &shader = shaders_.at(shaderIdx);
         shader.depthStencilInfo_.depthTestEnable = true;
         shader.depthStencilInfo_.depthWriteEnable = true;
         shader.depthStencilInfo_.depthCompareOp = vk::CompareOp::eGreater;
@@ -693,51 +818,38 @@ public:
 
     void setAttachmentProperties(ShaderIdx shaderIdx, const std::string& variableName,
                                  vk::ImageAspectFlags aspects, vk::ImageLayout layout){
-        auto &attach = shaderParsedAttachmentInfo_.at(shaderIdx).at(variableName);
+        auto& shader = shaders_.at(shaderIdx);
+        auto &attach = shader.parsedAttachmentInfo_.at(variableName);
         attach.attachRef.aspectMask = aspects;
         attach.attachRef.layout = layout;
     }
 
-    std::tuple<vk::PipelineColorBlendStateCreateInfo, std::unordered_map<std::string, vk::PipelineColorBlendAttachmentState>>
-    getColorBlendInfo(ShaderIdx shaderIdx){
+    void setColorAttachmentBlendInfo(ShaderIdx shaderIdx, const std::string& variableName){
+        auto& shader = shaders_.at(shaderIdx);
+        auto &attach = shader.parsedAttachmentInfo_.at(variableName);
+        assert(attach.attachType == FragmentShaderBase::AttachmentType::eColor);
+        attach.blendInfo.blendEnable = false;
+        attach.blendInfo.colorWriteMask =
+                vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
+                vk::ColorComponentFlagBits::eA;
+    }
+
+    void setColorBlendInfo(ShaderIdx shaderIdx){
+        // Hard-code for now
         auto &shader = shaders_.at(shaderIdx);
-        std::unordered_map<std::string, vk::PipelineColorBlendAttachmentState> colors{};
-        for (const auto& attach: shaderParsedAttachmentInfo_.at(shaderIdx)){
-            colors[attach.first] = attach.second.blendInfo;
-        }
-        vk::PipelineColorBlendStateCreateInfo createInfo{};
-        createInfo.logicOpEnable = false;
-        createInfo.logicOp = vk::LogicOp::eCopy;
-        createInfo.blendConstants = {{ 0.0f,0.0f,0.0f,0.0f }};
-        return std::make_tuple(createInfo, colors);
+        shader.colorBlendInfo_.logicOpEnable = false;
+        shader.colorBlendInfo_.logicOp = vk::LogicOp::eCopy;
+        shader.colorBlendInfo_.blendConstants = {{ 0.0f,0.0f,0.0f,0.0f }};
     }
 
 private:
     vk::Device device_{};
     std::unordered_map<std::string, ShaderIdx> shaderLUT_{};
     std::map<ShaderIdx, FragmentShaderBase> shaders_{};
-    enum class AttachmentType {
-        //TODO: add support for preserveAttachments
-        eUnknown = 0,
-        eInput= 1,
-        eColor = 2,
-        eResolve = 3,
-        eDepthStencil = 4
-    };
-    // Polymorphism through enum, yay
-    struct AttachmentParsedInfo {
-        AttachmentType attachType{};
-        vk::AttachmentReference2 attachRef{};
-        // Input attachment only
-        typedef uint32_t InAttachIdx;
-        InAttachIdx inputAttachIdx{};
-        // Color attachment only
-        LocIdx location{};
-        vk::PipelineColorBlendAttachmentState blendInfo{};
-    };
-    std::map<ShaderIdx, std::unordered_map<std::string, AttachmentParsedInfo>> shaderParsedAttachmentInfo_{};
     // Very little Vulkan API related info can be parsed from shader code
     // We don't allow name-aliasing here
+    using AttachmentParsedInfo = FragmentShaderBase::AttachmentParsedInfo;
+    using AttachmentType = FragmentShaderBase::AttachmentType;
     static std::unordered_map<std::string, AttachmentParsedInfo> parseAttachments(FragmentShaderBase &shader){
         auto glsl = spirv_cross::CompilerGLSL(shader.irCode_);
         std::unordered_map<std::string, AttachmentParsedInfo> attaches{};
@@ -760,11 +872,6 @@ private:
             attachInfo.attachRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
             attachInfo.attachRef.aspectMask = vk::ImageAspectFlagBits::eColor;
             attachInfo.location = glsl.get_decoration(colorAttach.id, spv::DecorationLocation);
-            // No custom settings for now
-            attachInfo.blendInfo.blendEnable = false;
-            attachInfo.blendInfo.colorWriteMask =
-                    vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
-                    vk::ColorComponentFlagBits::eA;
             attaches[colorAttach.name] = attachInfo;
         }
         // Depth attachment is implicit.
@@ -777,10 +884,13 @@ private:
 
     auto shaderFactory = VertexShaderFactory{device.get()};
     auto testShaderIdx = shaderFactory.registerShader("test");
-    shaderFactory.loadShaderModule(testShaderIdx, "shaders/shader.vert.spv");
+    shaderFactory.loadShaderModule(testShaderIdx, "shaders/shader.vert.spv", "main");
     std::vector<std::string> testVertAttrs = {"inPosition", "inColor", "inTexCoord"};
-    shaderFactory.bindVertexInputAttributeTable<model_info::PCTVertex>(testShaderIdx, vk::VertexInputRate::eVertex, 0,
-                                                                       testVertAttrs);
+    shaderFactory.setVertexInputAttributeTable<model_info::PCTVertex>(testShaderIdx, vk::VertexInputRate::eVertex, 0,
+                                                                      testVertAttrs);
+    shaderFactory.setInputAssemblyState(testShaderIdx, vk::PrimitiveTopology::eTriangleList);
+    shaderFactory.setRasterizationInfo(testShaderIdx);
+
  * */
 class VertexShaderFactory {
 public:
@@ -794,10 +904,11 @@ public:
 
     ShaderIdx registerShader(const std::string_view shaderName) {
         ShaderIdx index = shaders_.empty() ? 0 : shaders_.rbegin()->first + 1;
-        shaders_[index] = {};
-        shaders_[index].name_ = shaderName;
+        VertexShaderBase shader{device_};
+        shader.name_ = shaderName;
         std::string nameStr{shaderName};
         shaderLUT_[nameStr] = index;
+        shaders_.emplace(std::make_pair(index, std::move(shader)));
         return index;
     }
 
@@ -806,26 +917,38 @@ public:
             auto result = VertexShaderBase{};
             std::swap(shaders_.at(index), result);
             shaders_.erase(index);
-            shaderParsedVertexInputInfo_.erase(index);
+            //shaderParsedVertexInputInfo_.erase(index);
             shaderLUT_.erase(result.name_);
             return result;
         }
     }
 
-    void loadShaderModule(ShaderIdx shaderIdx, const std::string_view filePath) {
+    void loadShaderModule(ShaderIdx shaderIdx, const std::string_view filePath, const std::string &entryPointName) {
         auto &shader = shaders_.at(shaderIdx);
         shader.irCode_ = utils::load_shader_byte_code(filePath);
-        shader.shaderModule_ = utils::create_shader_module(filePath, device_);
+        shader.entryPoint_ = entryPointName;
         shader.descriptors_ = shader::parse_descriptors(shader.irCode_, vk::ShaderStageFlagBits::eVertex);
-        shaderParsedVertexInputInfo_[shaderIdx] = parseVertexInputAttrs(shader);
+        shader.parsedVertexInputInfo_ = parseVertexInputAttrs(shader);
+    }
+
+    void setRasterizationInfo(ShaderIdx shaderIdx){
+        // Hard-code for now
+        auto &shader = shaders_.at(shaderIdx);
+        shader.rasterizationInfo_.depthClampEnable = false;
+        shader.rasterizationInfo_.rasterizerDiscardEnable = false;
+        shader.rasterizationInfo_.polygonMode = vk::PolygonMode::eFill;
+        shader.rasterizationInfo_.lineWidth = 1.0f;
+        shader.rasterizationInfo_.cullMode = vk::CullModeFlagBits::eBack;
+        shader.rasterizationInfo_.frontFace = vk::FrontFace::eCounterClockwise;
+        shader.rasterizationInfo_.depthBiasEnable = false;
     }
 
     template<class BindType>
-    void bindVertexInputAttributeTable(ShaderIdx shaderIdx,
+    void setVertexInputAttributeTable(ShaderIdx shaderIdx,
                                        vk::VertexInputRate rate, BindIdx binding,
                                        const std::span<const std::string> attrNames) {
         auto &shader = shaders_.at(shaderIdx);
-        auto &inputInfo = shaderParsedVertexInputInfo_.at(shaderIdx);
+        auto &inputInfo = shader.parsedVertexInputInfo_;
         auto numAttrs = attrNames.size();
         assert(utils::meta_trick::member_count<BindType>() == numAttrs);
         vk::VertexInputBindingDescription bindTable{};
@@ -859,15 +982,7 @@ private:
     vk::Device device_{};
     std::unordered_map<std::string, ShaderIdx> shaderLUT_{};
     std::map<ShaderIdx, VertexShaderBase> shaders_{};
-    struct VertexInputAttrParsedInfo {
-        // We need more info to deal with GLSL's unintuitive rules
-        // https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap22.html#fxvertex-attrib-location
-        uint32_t startLocation;
-        uint32_t multiplier;
-        vk::Format format;
-        uint32_t fmtBaseCompByteSize;
-    };
-    std::map<ShaderIdx, std::unordered_map<std::string, VertexInputAttrParsedInfo>> shaderParsedVertexInputInfo_{};
+    using VertexInputAttrParsedInfo = VertexShaderBase::VertexInputAttrParsedInfo;
 
     static std::unordered_map<std::string, VertexInputAttrParsedInfo> parseVertexInputAttrs(VertexShaderBase &shader) {
         auto glsl = spirv_cross::CompilerGLSL(shader.irCode_);
