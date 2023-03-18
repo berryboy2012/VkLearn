@@ -178,6 +178,7 @@ private:
 
 class RenderpassBase{
 /* Lots of things need to be done here:
+ * Register subpass
  * Gather attachment references from all subpass
  *     Do not merge the info, may introduce name aliasing problems
  * Populate attachments
@@ -187,15 +188,122 @@ class RenderpassBase{
  *     trivial
  * Link attachments to resources
  *     Kind of hard to decide, first just link by string name, then we'll see how much info should be supplied
- * Create a corresponding framebuffer
- *     Should use resource name to query some info (for example, attachment linked to swapchain image)
  * Add subpass dependencies
  *     trivial
+ * Create a corresponding framebuffer
+ *     Should use resource name to query some info (for example, attachment linked to swapchain image)
  * Create vk::PipelineLayout, vk::Renderpass, vk::Framebuffer, vk::Pipeline
+ *     Where things get really messy
  * */
+public:
+    explicit RenderpassBase(vk::Device device): device_(device){}
+    RenderpassBase() = default;
+protected:
+    using SubpassIdx = factory::SubpassIdx;
+    using DependIdx = factory::DependIdx;
+    using AttachIdx = factory::AttachIdx;
+    using VkSubpassDependency2StructChain = factory::VkSubpassDependency2StructChain;
+    using AttachmentReferenceInfo = factory::AttachmentReferenceInfo;
+    using AttachmentInfo = factory::AttachmentInfo;
+    std::string name_{};
+    std::map<SubpassIdx, std::string> subpasses_{};
+    std::map<SubpassIdx, std::unordered_map<std::string, AttachmentReferenceInfo>> attachmentReferences_{};
+    std::map<AttachIdx, AttachmentInfo> attachments_{};
+    std::map<DependIdx, VkSubpassDependency2StructChain> dependencies_{};
 private:
     vk::Device device_{};
     vk::UniqueRenderPass renderPass_{};
     vk::UniqueFramebuffer framebuffer_{};
+    friend class RenderpassFactory;
+};
+
+class RenderpassFactory{
+public:
+    using SubpassIdx = factory::SubpassIdx;
+    using AttachIdx = factory::AttachIdx;
+    using DependIdx = factory::DependIdx;
+    using VkSubpassDependency2StructChain = factory::VkSubpassDependency2StructChain;
+    using RenderpassIdx = factory::RenderpassIdx;
+    RenderpassFactory(
+            vk::Device device,
+            const SubpassFactory &subpassFactory,
+            const VertexShaderFactory &vertShaderFactory, const FragmentShaderFactory &fragShaderFactory):
+            device_(device), subpassFactory_(subpassFactory), vertFactory_(vertShaderFactory), fragFactory_(fragShaderFactory)
+            {}
+    RenderpassIdx registerRenderpass(const std::string &name){
+        RenderpassIdx index = renderpasses_.empty() ? 0 : renderpasses_.rbegin()->first + 1;
+        RenderpassBase renderpass{device_};
+        renderpass.name_ = name;
+        renderpasses_[index] = std::move(renderpass);
+        renderpassLUT_[name] = index;
+        return index;
+    }
+
+    SubpassIdx loadSubpass(RenderpassIdx index, const std::string &subpassName){
+        auto& renderpass = renderpasses_.at(index);
+        SubpassIdx subpassIdx = renderpass.subpasses_.empty() ? 0 : renderpass.subpasses_.rbegin()->first + 1;
+        renderpass.subpasses_[subpassIdx] = subpassName;
+        return subpassIdx;
+    }
+
+    void unloadSubpass(RenderpassIdx index, SubpassIdx subpassIndex){
+        auto& renderpass = renderpasses_.at(index);
+        renderpass.subpasses_.erase(subpassIndex);
+        renderpass.attachmentReferences_.erase(subpassIndex);
+    }
+
+    void gatherAttachmentReferences(RenderpassIdx index){
+        auto& renderpass = renderpasses_.at(index);
+        for (auto& subpassTranslation: renderpass.subpasses_){
+            const auto& subpass = subpassFactory_.propagateSubpass(subpassTranslation.second);
+            // Currently only fragment shader has attachments, if there are other possibilities, use propagateEnabledStages()
+            for (const auto& attachRef: fragFactory_.propagateShader(subpass.propagateFragShaderIdx()).propagateAttachmentInfo()){
+                renderpass.attachmentReferences_[subpassTranslation.first][attachRef.first] = attachRef.second;
+            }
+        }
+    }
+
+    AttachIdx createAttachment(RenderpassIdx index, const vk::AttachmentDescription2 &attachDescription){
+        auto& renderpass = renderpasses_.at(index);
+        AttachIdx attachIdx = renderpass.attachments_.empty() ? 0 : renderpass.attachments_.rbegin()->first + 1;
+        renderpass.attachments_[attachIdx].description = attachDescription;
+        return attachIdx;
+    }
+
+    void removeAttachment(RenderpassIdx index, AttachIdx attachIndex){
+        auto& renderpass = renderpasses_.at(index);
+        renderpass.attachments_.erase(attachIndex);
+    }
+
+    // Yup, that's what the deep encapsulation of Vulkan API gives you
+    void linkAttachmentRefWithAttach(RenderpassIdx index, SubpassIdx subpassIndex, const std::string &shaderVariableName, AttachIdx attachmentIndex){
+        auto& renderpass = renderpasses_.at(index);
+        renderpass.attachmentReferences_.at(subpassIndex).at(shaderVariableName).attachRef.attachment = attachmentIndex;
+    }
+
+    void linkAttachmentWithResource(RenderpassIdx index, AttachIdx attachmentIndex, const std::string &resourceName){
+        auto& renderpass = renderpasses_.at(index);
+        renderpass.attachments_.at(attachmentIndex).resName = resourceName;
+    }
+
+    DependIdx addSubpassDependency(RenderpassIdx index, const VkSubpassDependency2StructChain& subpassDependency){
+        auto& renderpass = renderpasses_.at(index);
+        DependIdx dependIdx = renderpass.dependencies_.empty() ? 0 : renderpass.dependencies_.rbegin()->first + 1;
+        renderpass.dependencies_[dependIdx] = subpassDependency;
+        return dependIdx;
+    }
+
+    void removeSubpassDependency(RenderpassIdx index, DependIdx dependencyIndex){
+        auto& renderpass = renderpasses_.at(index);
+        renderpass.dependencies_.erase(dependencyIndex);
+    }
+
+private:
+    const SubpassFactory &subpassFactory_;
+    const VertexShaderFactory &vertFactory_;
+    const FragmentShaderFactory &fragFactory_;
+    std::map<RenderpassIdx, RenderpassBase> renderpasses_{};
+    std::unordered_map<std::string, RenderpassIdx> renderpassLUT_{};
+    vk::Device device_{};
 };
 #endif //VKLEARN_RENDERPASS_HPP

@@ -342,9 +342,20 @@ private:
 class SubpassBase{
 public:
     using DescSetIdx = factory::DescSetIdx;
+    using ShaderIdx = factory::ShaderIdx;
+    typedef uint64_t StageMask;
     [[nodiscard]] std::tuple<DescSetIdx, vk::DescriptorSetLayoutBinding> queryResourceBinding(const std::string &resName) const{
         const auto& descInfo = pipelineDescriptorInfo_.at(resourceBindingLUT_.at(resName));
         return std::make_tuple(descInfo.set, descInfo.desc);
+    }
+    [[nodiscard]] ShaderIdx propagateVertShaderIdx() const{
+        return vertex_;
+    }
+    [[nodiscard]] ShaderIdx propagateFragShaderIdx() const{
+        return fragment_;
+    }
+    [[nodiscard]] StageMask propagateEnabledStages() const{
+        return stages_;
     }
     explicit SubpassBase(vk::Device device){
         device_ = device;
@@ -357,11 +368,11 @@ protected:
     using AttachmentReferenceInfo = factory::AttachmentReferenceInfo;
     std::unordered_map<std::string, AttachmentReferenceInfo> subpassAttachmentReferenceInfo_{};
     // Info modified by current level factories only
-    using ShaderIdx = factory::ShaderIdx;
+
     ShaderIdx vertex_{}, fragment_{};
     using ShaderDescriptorInfo = factory::ShaderDescriptorInfo;
     std::unordered_map<std::string, ShaderDescriptorInfo> pipelineDescriptorInfo_{};
-    typedef uint64_t StageMask;
+
     enum ShaderStage: uint64_t {
         eNone                   = 0b0LLU,
         eVertex                 = 0b1LLU,
@@ -442,6 +453,10 @@ public:
     void registerSubpass(const std::string &subpassName){
         subpassDict_[subpassName] = {};
         subpassDict_[subpassName].stages_ = ShaderStage::eNone;
+    }
+
+    [[nodiscard]] const SubpassBase& propagateSubpass(const std::string &subpassName) const{
+        return subpassDict_.at(subpassName);
     }
 
     void addVertexShader(const std::string &subpassName, factory::ShaderIdx shaderIdx){

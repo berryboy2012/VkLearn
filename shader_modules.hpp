@@ -15,6 +15,10 @@
 #include "utils.h"
 #include "model_data.hpp"
 namespace factory {
+    typedef size_t RenderpassIdx;
+    typedef uint32_t AttachIdx;
+    typedef uint32_t DependIdx;
+    typedef uint32_t SubpassIdx;
     typedef size_t ShaderIdx;
     typedef uint32_t DescSetIdx;
     typedef uint32_t BindIdx;
@@ -35,6 +39,23 @@ namespace factory {
         vk::Format format;
         uint32_t fmtBaseCompByteSize;
     };
+
+    struct AttachmentInfo {
+        //std::string name{};
+        std::string resName{};
+        vk::AttachmentDescription2 description{};
+//        // framebuffer and image
+//        vk::Format format{};
+//        vk::ImageCreateFlags flags{};
+//        vk::ImageUsageFlags usage{};
+//        // image only
+//        vk::ImageTiling tiling{};
+//        vk::ImageLayout layout{};
+//        vma::AllocationCreateFlags vmaFlag{};
+//        // image view only
+//        vk::ImageAspectFlags aspect{};
+    };
+    typedef vk::StructureChain<vk::SubpassDependency2, vk::MemoryBarrier2> VkSubpassDependency2StructChain;
     // Tested for UBO and SSBO
     size_t get_resource_byte_size(spirv_cross::CompilerGLSL &glsl, const spirv_cross::Resource &res) {
         size_t byteSize{0};
