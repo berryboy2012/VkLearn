@@ -16,7 +16,7 @@ public:
     typedef size_t DependIdx;
 
     vk::RenderPass renderpass_{};
-    std::map<AttachIdx, AttachmentInfo> attachDescs_{};
+    std::map<AttachIdx, AttachmentInfoBundle> attachDescs_{};
     std::vector<SubpassInfo> subpasses_{};
     std::vector<SubpassAttachmentReferences> subpassRefs_{};
 
@@ -49,7 +49,7 @@ public:
     //  any new attachments it introduces, which in turn are registered by corresponding pipelines
 
     // First register attachments, since attachments' info is referenced by vk::SubpassDescription2
-    void registerSubpassAttachment(const AttachmentInfo &attach, AttachIdx index){
+    void registerSubpassAttachment(const AttachmentInfoBundle &attach, AttachIdx index){
         attachDescs_[index] = attach;
     }
 
@@ -174,5 +174,28 @@ private:
     vk::Device device_{};
 
     vk::UniqueRenderPass pass_{};
+};
+
+class RenderpassBase{
+/* Lots of things need to be done here:
+ * Gather attachment references from all subpass
+ *     Do not merge the info, may introduce name aliasing problems
+ * Populate attachments
+ *     Caller should specify most of vk::AttachmentDescription2
+ *     Caller don't have control over index
+ * Link attachment references to attachments
+ *     trivial
+ * Link attachments to resources
+ *     Kind of hard to decide, first just link by string name, then we'll see how much info should be supplied
+ * Create a corresponding framebuffer
+ *     Should use resource name to query some info (for example, attachment linked to swapchain image)
+ * Add subpass dependencies
+ *     trivial
+ * Create vk::PipelineLayout, vk::Renderpass, vk::Framebuffer, vk::Pipeline
+ * */
+private:
+    vk::Device device_{};
+    vk::UniqueRenderPass renderPass_{};
+    vk::UniqueFramebuffer framebuffer_{};
 };
 #endif //VKLEARN_RENDERPASS_HPP

@@ -339,15 +339,65 @@ private:
     vk::UniquePipeline pipe_{};
     vk::Device device_{};
 };
+class SubpassBase{
+public:
+    using DescSetIdx = factory::DescSetIdx;
+    [[nodiscard]] std::tuple<DescSetIdx, vk::DescriptorSetLayoutBinding> queryResourceBinding(const std::string &resName) const{
+        const auto& descInfo = pipelineDescriptorInfo_.at(resourceBindingLUT_.at(resName));
+        return std::make_tuple(descInfo.set, descInfo.desc);
+    }
+    explicit SubpassBase(vk::Device device){
+        device_ = device;
+    }
+    SubpassBase() = default;
+protected:
+    // Methods for getting usable Vulkan API info
 
+    // Incomplete info, will be propagated to higher levels
+    using AttachmentReferenceInfo = factory::AttachmentReferenceInfo;
+    std::unordered_map<std::string, AttachmentReferenceInfo> subpassAttachmentReferenceInfo_{};
+    // Info modified by current level factories only
+    using ShaderIdx = factory::ShaderIdx;
+    ShaderIdx vertex_{}, fragment_{};
+    using ShaderDescriptorInfo = factory::ShaderDescriptorInfo;
+    std::unordered_map<std::string, ShaderDescriptorInfo> pipelineDescriptorInfo_{};
+    typedef uint64_t StageMask;
+    enum ShaderStage: uint64_t {
+        eNone                   = 0b0LLU,
+        eVertex                 = 0b1LLU,
+//        eTessellationControl    = 0b10LLU,
+//        eTessellationEvaluation = 0b100LLU,
+//        eGeometry               = 0b1000LLU,
+        eFragment               = 0b10000LLU,
+        eCompute                = 0b100000LLU,
+//        eRaygenKHR              = 0b1000000LLU,
+//        eAnyHitKHR              = 0b10000000LLU,
+//        eClosestHitKHR          = 0b100000000LLU,
+//        eMissKHR                = 0b1000000000LLU,
+//        eIntersectionKHR        = 0b10000000000LLU,
+//        eCallableKHR            = 0b100000000000LLU,
+//        eTaskEXT                = 0b1000000000000LLU,
+//        eMeshEXT                = 0b10000000000000LLU,
+        eFull                   = 0xFFFFFFFFFFFFFFFFLLU
+    };
+    StageMask stages_{};
+private:
+    vk::Device device_{};
+    vk::UniquePipeline pipeline_{};
+    vk::UniquePipelineLayout pipelineLayout_{};
+    std::unordered_map<std::string, std::string> resourceBindingLUT_{};
+    friend class SubpassFactory;
+};
 // Also helps building a pipeline
 // The twisted Vulkan API requires that a Pipeline object must be tied to a Renderpass object upon creation
 // Thus the creation of vk::Pipeline object has to be postponed to much later
 class SubpassFactory{
 public:
-    explicit SubpassFactory(vk::Device device){
-        device_ = device;
-    }
+    explicit SubpassFactory(vk::Device device, const VertexShaderFactory &vertShaderFactory, const FragmentShaderFactory &fragShaderFactory):
+    device_(device),
+    vertFactory_(vertShaderFactory),
+    fragFactory_(fragShaderFactory)
+    {}
 /* Things needed to be done in terms of pipeline:
     VkPipelineCreateFlags                            flags;
     // Shader related
@@ -367,22 +417,99 @@ public:
     // Fragment shader level
     const VkPipelineDepthStencilStateCreateInfo*     pDepthStencilState;
     const VkPipelineColorBlendStateCreateInfo*       pColorBlendState;
-    // Subpass level
+    // Subpass level, ignore for now
     const VkPipelineDynamicStateCreateInfo*          pDynamicState;
+    // Subpass level
     VkPipelineLayout                                 layout;
     // Renderpass level
     VkRenderPass                                     renderPass;
     uint32_t                                         subpass;
-    // Don't implement for now
+    // Ignore for now
     VkPipeline                                       basePipelineHandle;
     int32_t                                          basePipelineIndex;
  * */
 
 
 /* For a subpass:
- *
+ *   1. Descriptor set layouts: trivial
+ *   2. Link descriptor bindings with resources
+ *     Each descriptor binding has a resource name id
+ *     Resources can query its descriptor set index and binding by the name id
+ *   3. Gather attachment references
+ *     Each attachment reference has a mapping id
  * */
+    using ShaderStage = SubpassBase::ShaderStage;
+    void registerSubpass(const std::string &subpassName){
+        subpassDict_[subpassName] = {};
+        subpassDict_[subpassName].stages_ = ShaderStage::eNone;
+    }
+
+    void addVertexShader(const std::string &subpassName, factory::ShaderIdx shaderIdx){
+        auto& subpass = subpassDict_.at(subpassName);
+        subpass.vertex_ = shaderIdx;
+        subpass.stages_ |= ShaderStage::eVertex;
+    }
+
+    void addFragmentShader(const std::string &subpassName, factory::ShaderIdx shaderIdx){
+        auto& subpass = subpassDict_.at(subpassName);
+        subpass.fragment_ = shaderIdx;
+        subpass.stages_ |= ShaderStage::eFragment;
+        gatherAttachmentReferences(subpass);
+    }
+
+    void gatherSubpassInfo(const std::string &subpassName){
+        auto& subpass = subpassDict_.at(subpassName);
+        assert(shaderStagesFilled(subpass));
+        gatherAttachmentReferences(subpass);
+        gatherDescriptorSetLayouts(subpass);
+    }
+
+    //TODO: Don't use std::string as resource's ID here, it is too confusing
+    void linkDescriptorWithResourceName(const std::string &subpassName, const std::string &descriptorName, const std::string &resourceName){
+        auto& subpass = subpassDict_.at(subpassName);
+        assert(shaderStagesFilled(subpass));
+        subpass.pipelineDescriptorInfo_.at(descriptorName).resName = resourceName;
+        subpass.resourceBindingLUT_[resourceName] = descriptorName;
+    }
+
 private:
     vk::Device device_{};
+    const VertexShaderFactory &vertFactory_;
+    const FragmentShaderFactory &fragFactory_;
+    // To avoid confusion with subpass index used in renderpass, we use name as ID
+    std::unordered_map<std::string, SubpassBase> subpassDict_{};
+
+    [[nodiscard]] static bool shaderStagesFilled(const SubpassBase& subpass) {
+        if ((subpass.stages_ & (ShaderStage::eVertex|ShaderStage::eFragment)) == (ShaderStage::eVertex|ShaderStage::eFragment)){
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+    // To avoid the need to handle aliasing explicitly, we further propagate attachment references to renderpass
+    void gatherAttachmentReferences(SubpassBase &subpass){
+        subpass.subpassAttachmentReferenceInfo_ = fragFactory_.propagateShader(subpass.fragment_).propagateAttachmentInfo();
+    }
+
+    void gatherDescriptorSetLayouts(SubpassBase& subpass){
+        // Stage by stage instead
+        subpass.pipelineDescriptorInfo_ = {};
+        const auto& stages = subpass.stages_;
+        // Vertex
+        if ((ShaderStage::eVertex&stages)==ShaderStage::eVertex){
+            const auto& shader = vertFactory_.propagateShader(subpass.vertex_);
+            for (const auto& desc : shader.propagateDescriptors()){
+                subpass.pipelineDescriptorInfo_[desc.first] = desc.second;
+            }
+        }
+        // Fragment
+        if ((ShaderStage::eFragment&stages)==ShaderStage::eFragment){
+            const auto& shader = fragFactory_.propagateShader(subpass.fragment_);
+            for (const auto& desc : shader.propagateDescriptors()){
+                subpass.pipelineDescriptorInfo_[desc.first] = desc.second;
+            }
+        }
+    }
 };
 #endif //VKLEARN_GRAPHICS_PIPELINE_HPP
