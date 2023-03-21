@@ -41,20 +41,113 @@ namespace factory {
     };
 
     struct AttachmentInfo {
-        //std::string name{};
         std::string resName{};
         vk::AttachmentDescription2 description{};
-//        // framebuffer and image
-//        vk::Format format{};
-//        vk::ImageCreateFlags flags{};
-//        vk::ImageUsageFlags usage{};
-//        // image only
-//        vk::ImageTiling tiling{};
-//        vk::ImageLayout layout{};
-//        vma::AllocationCreateFlags vmaFlag{};
-//        // image view only
-//        vk::ImageAspectFlags aspect{};
     };
+
+    enum class ResourceType: uint8_t {
+        eUndefined = 0,
+        eBuffer = 1,
+        eImage = 2,
+        //eImagelessView = 3,
+        //eCombinedImageSampler = 4,
+        eAccelStruct = 5,
+        eCount = 6
+    };
+
+    template<ResourceType resT>
+    struct VulkanConcreteResource {
+        std::string resName{};
+    };
+
+    template<>
+    struct VulkanConcreteResource<ResourceType::eBuffer> {
+        std::string resName{};
+        vma::Allocation mem{};
+        vma::AllocationInfo memInfo{};
+        bool isMemManaged{};
+        vk::Buffer resource{};
+        vk::BufferCreateInfo resInfo{};
+        bool isResourceManaged{};
+        uint32_t queueFamIdx{};
+    };
+
+    template<>
+    struct VulkanConcreteResource<ResourceType::eImage> {
+        std::string resName{};
+        vma::Allocation mem{};
+        vma::AllocationInfo memInfo{};
+        bool isMemManaged{};
+        vk::Image resource{};
+        vk::ImageCreateInfo resInfo{};
+        vk::ImageLayout currentLayout{};
+        bool isResourceManaged{};
+        uint32_t queueFamIdx{};
+        vk::ImageView view{};
+        vk::ImageViewCreateInfo viewInfo{};
+        bool isViewManaged{};
+        vk::Sampler sampler{};
+        vk::SamplerCreateInfo samplerInfo{};
+        bool isSamplerManaged{};
+    };
+
+    template<>
+    struct VulkanConcreteResource<ResourceType::eAccelStruct> {
+        std::string resName{};
+        vma::Allocation mem{};
+        vma::AllocationInfo memInfo{};
+        bool isMemManaged{};
+        vk::AccelerationStructureKHR resource{};
+        vk::AccelerationStructureCreateInfoKHR resInfo{};
+        bool isResourceManaged{};
+        uint32_t queueFamIdx{};
+        //...
+    };
+
+    // Basically just a sugar class for polymorphism, any_cast related stuff should not leak to outside.
+    class VulkanResource{
+    public:
+        VulkanResource() = delete;
+        VulkanResource(ResourceType resourceType, const std::string &resourceName, uint32_t queueFamilyIndex): resType_(resourceType){
+            switch (resType_) {
+                case ResourceType::eBuffer:
+                    resStruct_ = VulkanConcreteResource<ResourceType::eBuffer>{.resName = resourceName, .queueFamIdx = queueFamilyIndex};
+                    break;
+                case ResourceType::eImage:
+                    resStruct_ = VulkanConcreteResource<ResourceType::eImage>{.resName = resourceName, .queueFamIdx = queueFamilyIndex};
+                    break;
+                case ResourceType::eAccelStruct:
+                    resStruct_ = VulkanConcreteResource<ResourceType::eAccelStruct>{.resName = resourceName, .queueFamIdx = queueFamilyIndex};
+                    break;
+                default:
+                    resStruct_ = VulkanConcreteResource<ResourceType::eUndefined>{.resName = resourceName};
+            }
+        }
+
+        [[nodiscard]] VulkanConcreteResource<ResourceType::eBuffer>& getBufferHandle(){
+            assert(resType_==ResourceType::eBuffer);
+            return std::any_cast<VulkanConcreteResource<ResourceType::eBuffer>&>(resStruct_);
+        }
+
+        [[nodiscard]] VulkanConcreteResource<ResourceType::eImage>& getImageHandle(){
+            assert(resType_==ResourceType::eImage);
+            return std::any_cast<VulkanConcreteResource<ResourceType::eImage>&>(resStruct_);
+        }
+
+        [[nodiscard]] VulkanConcreteResource<ResourceType::eAccelStruct>& getAccelStructHandle(){
+            assert(resType_==ResourceType::eAccelStruct);
+            return std::any_cast<VulkanConcreteResource<ResourceType::eAccelStruct>&>(resStruct_);
+        }
+
+        [[nodiscard]] ResourceType getResourceType() const{
+            return resType_;
+        }
+
+    private:
+        ResourceType resType_;
+        std::any resStruct_;
+    };
+
     typedef vk::StructureChain<vk::SubpassDependency2, vk::MemoryBarrier2> VkSubpassDependency2StructChain;
     // Tested for UBO and SSBO
     size_t get_resource_byte_size(spirv_cross::CompilerGLSL &glsl, const spirv_cross::Resource &res) {
@@ -409,6 +502,35 @@ namespace factory {
         LocIdx location{};
         vk::PipelineColorBlendAttachmentState blendInfo{};
     };
+
+    vk::ImageViewCreateInfo image_view_create_info_builder(
+            vk::Image image, vk::ImageType imageType, vk::Format format,
+            vk::ImageAspectFlags imageAspect, uint32_t mipLevels, uint32_t arrayLayers){
+        vk::ImageViewCreateInfo viewInfo{};
+        viewInfo.image = image;
+        switch (imageType) {
+            case vk::ImageType::e1D:
+                viewInfo.viewType = vk::ImageViewType::e1D;
+                break;
+            case vk::ImageType::e2D:
+                viewInfo.viewType = vk::ImageViewType::e2D;
+                break;
+            case vk::ImageType::e3D:
+                viewInfo.viewType = vk::ImageViewType::e3D;
+                break;
+        }
+        viewInfo.format = format;
+        viewInfo.components.r = vk::ComponentSwizzle::eIdentity;
+        viewInfo.components.g = vk::ComponentSwizzle::eIdentity;
+        viewInfo.components.b = vk::ComponentSwizzle::eIdentity;
+        viewInfo.components.a = vk::ComponentSwizzle::eIdentity;
+        viewInfo.subresourceRange.aspectMask = imageAspect;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = mipLevels;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = arrayLayers;
+        return viewInfo;
+    }
 }
 // Push constants seems to be slower than UBO
 struct ScenePushConstants {

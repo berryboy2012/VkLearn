@@ -7,7 +7,6 @@
 
 #include <concepts>
 #include "vulkan/vulkan.hpp"
-#include "commands_management.h"
 #include "spirv_glsl.hpp"
 #include "glm/glm.hpp"
 #include <optional>
@@ -18,6 +17,7 @@
 #include <functional>
 #include <iostream>
 
+#include "commands_management.h"
 #include "vk_mem_alloc.hpp"
 #include "utils.h"
 #include "global_objects.hpp"
@@ -157,6 +157,7 @@ struct VulkanImageHandle{
         view = std::move(imgView);
     }
 };
+
 class VulkanResourceManager{
     // A thin layer on top of VMA. Along with some helper function for creating usable vk::Buffer and vk::Image etc.
     //  You still need to manage the lifetime of resources by yourself.
@@ -288,10 +289,9 @@ public:
     }
 
     //TODO: implement async copy helper
-    static void copyBuffer(vk::Buffer srcBuffer, //vk::DeviceSize srcOffset,
+    void copyBuffer(vk::Buffer srcBuffer, //vk::DeviceSize srcOffset,
                     vk::Buffer dstBuffer, //vk::DeviceSize dstOffset,
-                    vk::DeviceSize size,
-                    CommandBufferManager &cmdMgr){
+                    vk::DeviceSize size){
 
         std::vector<vk::BufferCopy> copyRegions;
         vk::BufferCopy copyRegion;
@@ -300,13 +300,13 @@ public:
         copyRegion.size = size;
         copyRegions.push_back(copyRegion);
         {
-            auto singleTime = cmdMgr.getSingleTimeCommandBuffer();
+            auto singleTime = resCmdPool_.getSingleTimeCommandBuffer();
             singleTime.coBuf_.copyBuffer(srcBuffer, dstBuffer, copyRegions.size(), copyRegions.data());
         }
     }
+
     //TODO: implement async copy helper
-    static void copyImageFromBuffer(vk::Buffer srcBuffer, vk::Image dstImage, vk::Extent3D extent,
-                                    CommandBufferManager &cmdMgr){
+    void copyImageFromBuffer(vk::Buffer srcBuffer, vk::Image dstImage, vk::Extent3D extent){
         std::vector<vk::BufferImageCopy> copyRegions;
         vk::BufferImageCopy copyRegion;
         copyRegion.bufferOffset = 0;
@@ -320,9 +320,37 @@ public:
         copyRegion.imageExtent = extent;
         copyRegions.push_back(copyRegion);
         {
-            auto singleTime = cmdMgr.getSingleTimeCommandBuffer();
+            auto singleTime = resCmdPool_.getSingleTimeCommandBuffer();
             singleTime.coBuf_.copyBufferToImage(srcBuffer, dstImage, vk::ImageLayout::eTransferDstOptimal, copyRegions);
         }
+    }
+
+    [[nodiscard("Keep track of imageLayout")]] vk::ImageLayout copyImageFromBuffer(
+            vk::Buffer srcBuffer,
+            uint32_t mipLevels, uint32_t arrayLayers, vk::ImageAspectFlags imageAspect,
+            vk::ImageLayout imageCurrentLayout, vk::Image dstImage, vk::Extent3D extent){
+        std::vector<vk::BufferImageCopy> copyRegions;
+        vk::BufferImageCopy copyRegion;
+        copyRegion.bufferOffset = 0;
+        copyRegion.bufferRowLength = 0;
+        copyRegion.bufferImageHeight = 0;
+        copyRegion.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+        copyRegion.imageSubresource.mipLevel = 0;
+        copyRegion.imageSubresource.baseArrayLayer = 0;
+        copyRegion.imageSubresource.layerCount = 1;
+        copyRegion.imageOffset = vk::Offset3D{0, 0, 0};
+        copyRegion.imageExtent = extent;
+        copyRegions.push_back(copyRegion);
+        transitionImageLayout(dstImage, mipLevels, arrayLayers, imageAspect, imageCurrentLayout, vk::ImageLayout::eTransferDstOptimal);
+        {
+            auto singleTime = resCmdPool_.getSingleTimeCommandBuffer();
+            singleTime.coBuf_.copyBufferToImage(srcBuffer, dstImage, vk::ImageLayout::eTransferDstOptimal, copyRegions);
+        }
+        if (imageCurrentLayout != vk::ImageLayout::eUndefined){
+            transitionImageLayout(dstImage, mipLevels, arrayLayers, imageAspect, vk::ImageLayout::eTransferDstOptimal, imageCurrentLayout);
+            return vk::ImageLayout::eTransferDstOptimal;
+        }
+        return imageCurrentLayout;
     }
 
     template<class HostElementType>
@@ -335,24 +363,12 @@ public:
         auto stagingBuffer = createStagingBuffer(bufferSize);
         std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
         auto finalBuffer = createBuffernMemory(bufferSize, bufferUsage|BufUsage::eTransferDst, vmaFlag, memProps, vmaMemUsage);
-        copyBuffer(stagingBuffer.resource.get(), finalBuffer.resource.get(), bufferSize, resCmdPool_);
+        copyBuffer(stagingBuffer.resource.get(), finalBuffer.resource.get(), bufferSize);
         return std::move(finalBuffer);
     }
-    // Deprecated
-    static void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
-                                      vk::Device &device, vk::CommandPool &commandPool, vk::Queue &graphicsQueue){
-        auto [barrier, sourceStage, destinationStage] = imgLayoutTransitionInfoBuilder(image, format, oldLayout,
-                                                                                       newLayout);
 
-        {
-            SingleTimeCommandBuffer singleTime{commandPool, graphicsQueue, device};
-            singleTime.coBuf_.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
-        }
-    }
-
-    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout){
-        auto [barrier, sourceStage, destinationStage] = imgLayoutTransitionInfoBuilder(image, format, oldLayout,
-                                                                                       newLayout);
+    void transitionImageLayout(vk::Image image, uint32_t mipLevels, uint32_t arrayLayers, vk::ImageAspectFlags imageAspect, vk::ImageLayout oldLayout, vk::ImageLayout newLayout){
+        auto [barrier, sourceStage, destinationStage] = imgLayoutTransitionInfoBuilder(image, mipLevels, arrayLayers, imageAspect, oldLayout, newLayout);
 
         {
             auto singleTime = resCmdPool_.getSingleTimeCommandBuffer();
@@ -390,10 +406,9 @@ public:
         auto stagingBuffer = createStagingBuffer(bufferSize);
         std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
         auto finalImage = createImagenMemory(extent, format, tiling, layout, imageUsage|ImgUsage::eTransferDst, vmaFlag, memProps, vmaMemUsage);
-        transitionImageLayout(finalImage.resource.get(), format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-        copyImageFromBuffer(stagingBuffer.resource.get(), finalImage.resource.get(), extent, resCmdPool_);
-        transitionImageLayout(finalImage.resource.get(), format,
-                              vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+        transitionImageLayout(finalImage.resource.get(), finalImage.resInfo.mipLevels, finalImage.resInfo.arrayLayers, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+        copyImageFromBuffer(stagingBuffer.resource.get(), finalImage.resource.get(), extent);
+        transitionImageLayout(finalImage.resource.get(), finalImage.resInfo.mipLevels, finalImage.resInfo.arrayLayers, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
         return std::move(finalImage);
     }
     VulkanResourceManager getManagerHandle(){
@@ -420,37 +435,27 @@ private:
             vk::ImageMemoryBarrier,
             vk::PipelineStageFlags,
             vk::PipelineStageFlags> imgLayoutTransitionInfoBuilder(
-                    vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout){
+                    vk::Image image, uint32_t mipLevels, uint32_t arrayLayers, vk::ImageAspectFlags imageAspect, vk::ImageLayout oldLayout, vk::ImageLayout newLayout){
         vk::ImageMemoryBarrier barrier{};
         barrier.oldLayout = oldLayout;
         barrier.newLayout = newLayout;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = image;
-        barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        barrier.subresourceRange.aspectMask = imageAspect;
         barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.levelCount = mipLevels;
         barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
+        barrier.subresourceRange.layerCount = arrayLayers;
 
         vk::PipelineStageFlags sourceStage;
         vk::PipelineStageFlags destinationStage;
 
-        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
-            barrier.srcAccessMask = {};
-            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-
-            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
-            destinationStage = vk::PipelineStageFlagBits::eTransfer;
-        } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
-            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-
-            sourceStage = vk::PipelineStageFlagBits::eTransfer;
-            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
-        } else {
-            std::abort();
-        }
+        assert(newLayout != vk::ImageLayout::eUndefined);
+        barrier.srcAccessMask = vk::AccessFlagBits::eMemoryRead|vk::AccessFlagBits::eMemoryWrite;
+        barrier.dstAccessMask = vk::AccessFlagBits::eMemoryRead|vk::AccessFlagBits::eMemoryWrite;
+        sourceStage = vk::PipelineStageFlagBits::eAllCommands;
+        destinationStage = vk::PipelineStageFlagBits::eAllCommands;
         return std::make_tuple(barrier, sourceStage, destinationStage);
     }
     vk::Instance inst_{};
@@ -460,6 +465,8 @@ private:
     uint32_t queueIdxCGTP_{};
     vk::Queue queue_{};
     CommandBufferManager resCmdPool_{};
+    // ToDo: Deprecate VulkanResourceManager
+    friend class RenderResourceManager;
 };
 
 #endif //VKLEARN_MEMORY_MANAGEMENT_HPP

@@ -459,13 +459,13 @@ public:
         return subpassDict_.at(subpassName);
     }
 
-    void addVertexShader(const std::string &subpassName, factory::ShaderIdx shaderIdx){
+    void loadVertexShader(const std::string &subpassName, factory::ShaderIdx shaderIdx){
         auto& subpass = subpassDict_.at(subpassName);
         subpass.vertex_ = shaderIdx;
         subpass.stages_ |= ShaderStage::eVertex;
     }
 
-    void addFragmentShader(const std::string &subpassName, factory::ShaderIdx shaderIdx){
+    void loadFragmentShader(const std::string &subpassName, factory::ShaderIdx shaderIdx){
         auto& subpass = subpassDict_.at(subpassName);
         subpass.fragment_ = shaderIdx;
         subpass.stages_ |= ShaderStage::eFragment;
