@@ -19,11 +19,29 @@ namespace factory {
     typedef uint32_t AttachIdx;
     typedef uint32_t DependIdx;
     typedef uint32_t SubpassIdx;
+    typedef uint64_t StageMask;
     typedef size_t ShaderIdx;
     typedef uint32_t DescSetIdx;
     typedef uint32_t BindIdx;
     typedef uint32_t LocIdx;
-
+    enum ShaderStage: uint64_t {
+        eNone                   = 0b0LLU,
+        eVertex                 = 0b1LLU,
+//        eTessellationControl    = 0b10LLU,
+//        eTessellationEvaluation = 0b100LLU,
+//        eGeometry               = 0b1000LLU,
+        eFragment               = 0b10000LLU,
+        eCompute                = 0b100000LLU,
+//        eRaygenKHR              = 0b1000000LLU,
+//        eAnyHitKHR              = 0b10000000LLU,
+//        eClosestHitKHR          = 0b100000000LLU,
+//        eMissKHR                = 0b1000000000LLU,
+//        eIntersectionKHR        = 0b10000000000LLU,
+//        eCallableKHR            = 0b100000000000LLU,
+//        eTaskEXT                = 0b1000000000000LLU,
+//        eMeshEXT                = 0b10000000000000LLU,
+        eFull                   = 0xFFFFFFFFFFFFFFFFLLU
+    };
     struct ShaderDescriptorInfo{
         std::string resName{};
         DescSetIdx set{};
@@ -205,7 +223,7 @@ namespace factory {
             entry.desc.descriptorCount = count;
             entry.set = glsl.get_decoration(ubo.id, spv::DecorationDescriptorSet);
             entry.byteSize = get_resource_byte_size(glsl, ubo);
-            entries[ubo.name] = entry;
+            entries[glsl.get_name(ubo.id)] = entry;
         }
         // Here comes the complication: Input attachment needs an entry in descriptor set as well
         // Ignore subpassInputMS for now
@@ -221,9 +239,9 @@ namespace factory {
             entry.desc.stageFlags = stages;
             entry.desc.descriptorCount = count;
             entry.set = glsl.get_decoration(inAttach.id, spv::DecorationDescriptorSet);
-            assert(entries.contains(inAttach.name));
+            assert(entries.contains(glsl.get_name(inAttach.id)));
             entry.byteSize = get_resource_byte_size(glsl, inAttach);
-            entries[inAttach.name] = entry;
+            entries[glsl.get_name(inAttach.id)] = entry;
         }
         for (auto &combImg: resources.sampled_images) {
             const spirv_cross::SPIRType &type = glsl.get_type(combImg.type_id);
@@ -238,7 +256,7 @@ namespace factory {
             entry.desc.descriptorCount = count;
             entry.set = glsl.get_decoration(combImg.id, spv::DecorationDescriptorSet);
             entry.byteSize = get_resource_byte_size(glsl, combImg);
-            entries[combImg.name] = entry;
+            entries[glsl.get_name(combImg.id)] = entry;
         }
         for (auto &ssbo: resources.storage_buffers) {
             const spirv_cross::SPIRType &type = glsl.get_type(ssbo.type_id);
@@ -253,7 +271,7 @@ namespace factory {
             entry.desc.descriptorCount = count;
             entry.set = glsl.get_decoration(ssbo.id, spv::DecorationDescriptorSet);
             entry.byteSize = get_resource_byte_size(glsl, ssbo);
-            entries[ssbo.name] = entry;
+            entries[glsl.get_name(ssbo.id)] = entry;
         }
         for (auto &acc: resources.acceleration_structures) {
             const spirv_cross::SPIRType &type = glsl.get_type(acc.type_id);
@@ -268,12 +286,67 @@ namespace factory {
             entry.desc.descriptorCount = count;
             entry.set = glsl.get_decoration(acc.id, spv::DecorationDescriptorSet);
             entry.byteSize = get_resource_byte_size(glsl, acc);
-            entries[acc.name] = entry;
+            entries[glsl.get_name(acc.id)] = entry;
         }
         return entries;
     }
 
-    // the first component means a multiplier, the last component means byte size of a component inside the format (4 for R32G32B32Sfloat for example)
+    struct PushConstantInfo{
+        std::string resName{};
+        vk::ShaderStageFlags stages{};
+        std::string blockName{};
+        typedef std::string MemberName;
+        struct PushConstantMemberInfo{
+            MemberName name{};
+            uint32_t byteOffset{};
+            uint32_t byteSize{};
+        };
+        std::map<MemberName, PushConstantMemberInfo> members{};
+        [[nodiscard]] vk::PushConstantRange getPushBlockRange() const{
+            // Loop over members, sort by offset, min() is blockOffset,
+            // then sort by `offset+size`, max() - blockOffset is blockSize
+            vk::PushConstantRange result{};
+            result.stageFlags = stages;
+            result.offset = std::min_element(
+                    members.begin(), members.end(),
+                    [](const decltype(members)::value_type& l, const decltype(members)::value_type& r) -> bool {
+                        return l.second.byteOffset < r.second.byteOffset; })->second.byteOffset;
+            const auto& lastMember = std::max_element(
+                    members.begin(), members.end(),
+                    [](const decltype(members)::value_type& l, const decltype(members)::value_type& r) -> bool {
+                        return l.second.byteOffset+l.second.byteSize < r.second.byteOffset+r.second.byteSize; })->second;
+            result.size = lastMember.byteOffset+lastMember.byteSize-result.offset;
+            return result;
+        }
+    };
+
+    //Yup, this is the best I can do in terms of docs:
+    // https://raw.githubusercontent.com/KhronosGroup/GLSL/master/extensions/khr/GL_KHR_vulkan_glsl.txt
+    PushConstantInfo
+    parse_push_constants(const std::vector<uint32_t>& shaderCode, vk::ShaderStageFlags stage){
+        auto glsl = spirv_cross::CompilerGLSL(shaderCode);
+        spirv_cross::ShaderResources resources = glsl.get_shader_resources();
+        // At most one push constant block per stage
+        auto result = PushConstantInfo{};
+        result.stages = stage;
+        for (auto& push: resources.push_constant_buffers){
+            // push constant block can't be array, no need to count
+            // spirv-cross's API is a bit inconsistent here
+            result.blockName = push.name;
+            //loop over members, and find their offset, push-constant blocks themselves don't have offset
+            const spirv_cross::SPIRType &baseType = glsl.get_type(push.base_type_id);
+            for (uint32_t i = 0; i < baseType.member_types.size(); i++){
+                const auto& name = glsl.get_member_name(baseType.self, i);
+                uint32_t byteSize = glsl.get_declared_struct_member_size(baseType, i);
+                uint32_t byteOffset = glsl.type_struct_member_offset(baseType, i);
+                result.members[name] = {.name = name, .byteOffset=byteOffset, .byteSize=byteSize};
+            }
+        }
+        return result;
+    }
+
+    // the first component means a multiplier (number of rows),
+    // the last component means byte size of a component inside the format (4 for R32G32B32Sfloat for example)
     std::tuple<uint32_t, vk::Format, uint32_t>
     get_resource_format(spirv_cross::CompilerGLSL &glsl, const spirv_cross::Resource &res) {
         vk::Format fmt;
@@ -830,12 +903,15 @@ public:
         return shaderModule_.get();
     }
     // Methods for getting usable Vulkan API info
-    [[nodiscard]] std::string getEntryPointName() const{
+    [[nodiscard]] const std::string& getEntryPointName() const{
         return entryPoint_;
     }
     // Methods for propagating info to higher levels
     [[nodiscard]] const std::unordered_map<std::string, ShaderDescriptorInfo>& propagateDescriptors() const{
         return descriptors_;
+    }
+    [[nodiscard]] const factory::PushConstantInfo& propagatePushConstantBlock() const{
+        return pushConst_;
     }
     explicit ShaderBase(vk::Device device){
         device_ = device;
@@ -844,6 +920,7 @@ public:
 protected:
     // Incomplete info, will be propagated to higher levels
     std::unordered_map<std::string, ShaderDescriptorInfo> descriptors_{};
+    factory::PushConstantInfo pushConst_{};
     // Info modified by current level factories only
     std::vector<uint32_t> irCode_{};
     std::string name_{};
@@ -912,6 +989,9 @@ public:
     [[nodiscard]] vk::PipelineDepthStencilStateCreateInfo getDepthStencilInfo() const{
         return depthStencilInfo_;
     }
+    [[nodiscard]] vk::PipelineMultisampleStateCreateInfo getMSAAInfo() const {
+        return msaaInfo_;
+    }
     // Methods for propagating info to higher levels
     [[nodiscard]] const std::unordered_map<std::string, AttachmentReferenceInfo>& propagateAttachmentInfo() const{
         return attachmentInfo_;
@@ -927,6 +1007,7 @@ protected:
     vk::PipelineColorBlendStateCreateInfo colorBlendInfo_{};
     // Info modified by current level factories only
     vk::PipelineDepthStencilStateCreateInfo depthStencilInfo_{};
+    vk::PipelineMultisampleStateCreateInfo msaaInfo_{};
 private:
     friend class FragmentShaderFactory;
 };
@@ -973,6 +1054,7 @@ public:
         shader.entryPoint_ = entryPointName;
         shader.descriptors_ = factory::parse_descriptors(shader.irCode_, vk::ShaderStageFlagBits::eFragment);
         shader.attachmentInfo_ = parseAttachments(shader);
+        shader.pushConst_ = factory::parse_push_constants(shader.irCode_, vk::ShaderStageFlagBits::eFragment);
     }
 
     void setDepthStencilInfo(ShaderIdx shaderIdx){
@@ -989,10 +1071,10 @@ public:
             attachInfo.attachType = AttachmentType::eDepthStencil;
             attachInfo.attachRef.layout = vk::ImageLayout::eDepthAttachmentOptimal;
             attachInfo.attachRef.aspectMask = vk::ImageAspectFlagBits::eDepth;
-            shader.attachmentInfo_["depthShaderVariable"] = attachInfo;
+            shader.attachmentInfo_["__depthShaderVariable"] = attachInfo;
         } else{
-            if (shader.attachmentInfo_.contains("depthShaderVariable")){
-                shader.attachmentInfo_.erase("depthShaderVariable");
+            if (shader.attachmentInfo_.contains("__depthShaderVariable")){
+                shader.attachmentInfo_.erase("__depthShaderVariable");
             }
         }
     }
@@ -1021,6 +1103,18 @@ public:
         shader.colorBlendInfo_.logicOpEnable = false;
         shader.colorBlendInfo_.logicOp = vk::LogicOp::eCopy;
         shader.colorBlendInfo_.blendConstants = {{ 0.0f,0.0f,0.0f,0.0f }};
+    }
+
+    void setMSAAInfo(ShaderIdx shaderIdx){
+        // Hard-code for now
+        auto &shader = shaders_.at(shaderIdx);
+        shader.msaaInfo_.sampleShadingEnable = false;
+        shader.msaaInfo_.rasterizationSamples = vk::SampleCountFlagBits::e1;
+    }
+
+    vk::ShaderModule getShaderModule(ShaderIdx shaderIdx){
+        auto &shader = shaders_.at(shaderIdx);
+        return shader.getShaderModule();
     }
 
 private:
@@ -1112,6 +1206,7 @@ public:
         shader.entryPoint_ = entryPointName;
         shader.descriptors_ = factory::parse_descriptors(shader.irCode_, vk::ShaderStageFlagBits::eVertex);
         shader.parsedVertexInputInfo_ = parseVertexInputAttrs(shader);
+        shader.pushConst_ = factory::parse_push_constants(shader.irCode_, vk::ShaderStageFlagBits::eVertex);
     }
 
     void setRasterizationInfo(ShaderIdx shaderIdx){
@@ -1160,6 +1255,11 @@ public:
         shader.inputAsmInfo_.flags = {}; // Reserved
         shader.inputAsmInfo_.topology = topology;
         shader.inputAsmInfo_.primitiveRestartEnable = false; // Future
+    }
+
+    vk::ShaderModule getShaderModule(ShaderIdx shaderIdx){
+        auto &shader = shaders_.at(shaderIdx);
+        return shader.getShaderModule();
     }
 
 private:

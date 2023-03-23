@@ -200,7 +200,8 @@ class RenderpassBase{
  *     Where things get really messy
  * */
 public:
-    explicit RenderpassBase(vk::Device device, RenderResourceManager &resourceManager): device_(device), resMgr_(resourceManager){}
+    explicit RenderpassBase(vk::Extent2D extent, vk::Device device, RenderResourceManager &resourceManager):
+    renderExtent_(extent), device_(device), resMgr_(resourceManager){}
     [[nodiscard]] vk::RenderPass getRenderPass(){
         // Renderpass -- span<attachment>
         //        \\____ span<subpass>
@@ -218,6 +219,7 @@ public:
             attachIdxLUT[attach.first] = attachVkIdx;
             attachVkIdx += 1;
         }
+        attachVkIdxLUT_ = attachIdxLUT;
         std::vector<vk::SubpassDescription2> passes{}; passes.reserve(subpasses_.size());
         std::unordered_map<SubpassIdx , size_t> subpassIdxLUT{};
         std::unordered_map<SubpassIdx, std::vector<vk::AttachmentReference2>> subpassesColorAttachRefs{};
@@ -251,18 +253,28 @@ public:
                         assert(("must specify attachment type", false));
                 }
             }
-            subpassInfo.inputAttachmentCount = subpassesInputAttachRefs.at(subpass.first).size();
-            subpassInfo.pInputAttachments = subpassInfo.inputAttachmentCount > 0 ? subpassesInputAttachRefs.at(subpass.first).data() : nullptr;
-            subpassInfo.colorAttachmentCount = subpassesColorAttachRefs.at(subpass.first).size();
-            subpassInfo.pColorAttachments = subpassInfo.colorAttachmentCount > 0 ? subpassesColorAttachRefs.at(subpass.first).data() : nullptr;
-            subpassInfo.pResolveAttachments = subpassesResolveAttachRefs.at(subpass.first).empty() ? nullptr : subpassesResolveAttachRefs.at(subpass.first).data();
-            passes[subpassVkIdx] = subpassInfo;
+            if (subpassesInputAttachRefs.contains(subpass.first)){
+                subpassInfo.inputAttachmentCount = subpassesInputAttachRefs.at(subpass.first).size();
+                subpassInfo.pInputAttachments = subpassInfo.inputAttachmentCount > 0 ? subpassesInputAttachRefs.at(subpass.first).data() : nullptr;
+            }
+            if (subpassesColorAttachRefs.contains(subpass.first)){
+                subpassInfo.colorAttachmentCount = subpassesColorAttachRefs.at(subpass.first).size();
+                subpassInfo.pColorAttachments = subpassInfo.colorAttachmentCount > 0 ? subpassesColorAttachRefs.at(subpass.first).data() : nullptr;
+            }
+            if (subpassesResolveAttachRefs.contains(subpass.first)){
+                subpassInfo.pResolveAttachments = subpassesResolveAttachRefs.at(subpass.first).empty() ? nullptr : subpassesResolveAttachRefs.at(subpass.first).data();
+            }
+            if (subpassesDepthAttachRef.contains(subpass.first)){
+                subpassInfo.pDepthStencilAttachment = &subpassesDepthAttachRef.at(subpass.first);
+            }
+            passes.push_back(subpassInfo);
             subpassIdxLUT[subpass.first] = subpassVkIdx;
             subpassVkIdx += 1;
         }
+        subpassVkIdxLUT_ = subpassIdxLUT;
         std::vector<vk::StructureChain<vk::SubpassDependency2, vk::MemoryBarrier2>> depends{};
-        //std::unordered_map<DependIdx , size_t> dependIdxLUT{};
-        //size_t dependVkIdx = 0;
+        std::unordered_map<DependIdx , size_t> dependIdxLUT{};
+        size_t dependVkIdx = 0;
         for (const auto& depend: dependencies_){
             depends.push_back(depend.second);
             if (depends.rbegin()->get<vk::SubpassDependency2>().srcSubpass != VK_SUBPASS_EXTERNAL){
@@ -271,9 +283,10 @@ public:
             if (depends.rbegin()->get<vk::SubpassDependency2>().dstSubpass != VK_SUBPASS_EXTERNAL){
                 depends.rbegin()->get<vk::SubpassDependency2>().dstSubpass = subpassIdxLUT[depend.second.get<vk::SubpassDependency2>().dstSubpass];
             }
-            //dependIdxLUT[depend.first] = dependVkIdx;
-            //dependVkIdx += 1;
+            dependIdxLUT[depend.first] = dependVkIdx;
+            dependVkIdx += 1;
         }
+        dependVkIdxLUT_ = dependIdxLUT;
         auto createInfoDepends = std::vector<vk::SubpassDependency2>{};
         for (const auto& dep: depends){
             createInfoDepends.push_back(dep.get<vk::SubpassDependency2>());
@@ -289,7 +302,7 @@ public:
         return renderPass_.get();
     }
 
-    [[nodiscard]] vk::Framebuffer getFramebuffer(vk::Extent2D extent){
+    [[nodiscard]] vk::Framebuffer getFramebuffer(){
         if(static_cast<bool>(framebuffer_)){
             return framebuffer_.get();
         }
@@ -310,8 +323,8 @@ public:
         attachmentsInfo.setAttachmentImageInfos(attachInfos);
         vk::FramebufferCreateInfo framebufferInfo = {};
         framebufferInfo.renderPass = renderPass_.get();
-        framebufferInfo.width = extent.width;
-        framebufferInfo.height = extent.height;
+        framebufferInfo.width = renderExtent_.width;
+        framebufferInfo.height = renderExtent_.height;
         framebufferInfo.layers = 1;
         framebufferInfo.flags |= vk::FramebufferCreateFlagBits::eImageless;
         framebufferInfo.attachmentCount = attachmentsInfo.attachmentImageInfoCount;
@@ -331,8 +344,12 @@ protected:
     using AttachmentReferenceInfo = factory::AttachmentReferenceInfo;
     using AttachmentInfo = factory::AttachmentInfo;
     std::string name_{};
+    vk::Extent2D renderExtent_{};
     std::map<SubpassIdx, std::string> subpasses_{};
-    std::map<SubpassIdx, std::unordered_map<std::string, AttachmentReferenceInfo>> attachmentReferences_{};
+    // I give up, don't change to std::unordered_map<std::string, AttachmentReferenceInfo>, 
+    // we need the ordering enforced by std::map to avoid numerous dance caused by Vulkan BS --
+    // the order of elements in some api call will constrain the order of elements in subsequent calls
+    std::map<SubpassIdx, std::map<std::string, AttachmentReferenceInfo>> attachmentReferences_{};
     std::map<AttachIdx, AttachmentInfo> attachments_{};
     std::map<DependIdx, VkSubpassDependency2StructChain> dependencies_{};
 private:
@@ -340,6 +357,10 @@ private:
     RenderResourceManager &resMgr_;
     vk::UniqueRenderPass renderPass_{};
     vk::UniqueFramebuffer framebuffer_{};
+    // Useful when doing Vulkan API call with implicit order requirements
+    std::unordered_map<AttachIdx, size_t> attachVkIdxLUT_{};
+    std::unordered_map<SubpassIdx , size_t> subpassVkIdxLUT_{};
+    std::unordered_map<DependIdx , size_t> dependVkIdxLUT_{};
     friend class RenderpassFactory;
 };
 
@@ -352,20 +373,20 @@ public:
     using RenderpassIdx = factory::RenderpassIdx;
     RenderpassFactory(
             vk::Device device,
-            const SubpassFactory &subpassFactory,
-            const VertexShaderFactory &vertShaderFactory, const FragmentShaderFactory &fragShaderFactory, RenderResourceManager &resourceManager):
+            SubpassFactory &subpassFactory,
+            VertexShaderFactory &vertShaderFactory, FragmentShaderFactory &fragShaderFactory, RenderResourceManager &resourceManager):
             device_(device), subpassFactory_(subpassFactory), vertFactory_(vertShaderFactory), fragFactory_(fragShaderFactory), resMgr_(resourceManager)
             {}
-    RenderpassIdx registerRenderpass(const std::string &name){
+    [[nodiscard]] RenderpassIdx registerRenderpass(const std::string &name, vk::Extent2D extent){
         RenderpassIdx index = renderpasses_.empty() ? 0 : renderpasses_.rbegin()->first + 1;
-        RenderpassBase renderpass{device_, resMgr_};
+        RenderpassBase renderpass{extent, device_, resMgr_};
         renderpass.name_ = name;
         renderpasses_.try_emplace(index, std::move(renderpass));
         renderpassLUT_[name] = index;
         return index;
     }
 
-    SubpassIdx loadSubpass(RenderpassIdx index, const std::string &subpassName){
+    [[nodiscard]] SubpassIdx loadSubpass(RenderpassIdx index, const std::string &subpassName){
         auto& renderpass = renderpasses_.at(index);
         SubpassIdx subpassIdx = renderpass.subpasses_.empty() ? 0 : renderpass.subpasses_.rbegin()->first + 1;
         renderpass.subpasses_[subpassIdx] = subpassName;
@@ -423,12 +444,100 @@ public:
         auto& renderpass = renderpasses_.at(index);
         renderpass.dependencies_.erase(dependencyIndex);
     }
+    void buildVulkanObjects(RenderpassIdx index){
+        // Due to the intertwined nature of Vulkan API, we'd better create vk::Pipeline at renderpass level
+        auto& renderpass = renderpasses_.at(index);
+        /* The order works as follows:
+         * 1. RenderPass
+         * 2. Framebuffer
+         * 3. For each subpass:
+         *   a. ShaderModule
+         *   b. Pipeline
+         *   c. Descriptor set
+         * */
+        auto vkRenderPass = renderpass.getRenderPass();
+        renderpass.getFramebuffer();
+        for (const auto& subpassId: renderpass.subpasses_){
+            auto& subpass = subpassFactory_.propagateSubpass(subpassId.second);
+            if (!static_cast<bool>(subpass.pipeline_)){
+                // ShaderModule
+                std::vector<vk::PipelineShaderStageCreateInfo> shaderStages{};
+                using ShaderStage = factory::ShaderStage;
+                auto stages = subpass.propagateEnabledStages();
+                if ((stages&ShaderStage::eVertex) == ShaderStage::eVertex){
+                    vk::PipelineShaderStageCreateInfo info{};
+                    info.flags = {};
+                    info.stage = vk::ShaderStageFlagBits::eVertex;
+                    info.module = vertFactory_.getShaderModule(subpass.propagateVertShaderIdx());
+                    info.pName = vertFactory_.propagateShader(subpass.propagateVertShaderIdx()).getEntryPointName().data();
+                    shaderStages.push_back(info);
+                }
+                if ((stages&ShaderStage::eFragment) == ShaderStage::eFragment){
+                    vk::PipelineShaderStageCreateInfo info{};
+                    info.flags = {};
+                    info.stage = vk::ShaderStageFlagBits::eFragment;
+                    info.module = fragFactory_.getShaderModule(subpass.propagateFragShaderIdx());
+                    info.pName = fragFactory_.propagateShader(subpass.propagateFragShaderIdx()).getEntryPointName().data();
+                    shaderStages.push_back(info);
+                }
+                vk::PipelineVertexInputStateCreateInfo vertInputInfo{};
+                const auto& vertShader = vertFactory_.propagateShader(subpass.propagateVertShaderIdx());
+                auto vertInputData = vertShader.getVertexInputInfoData();
+                vertInputInfo = VertexShaderBase::getVertexInputInfo(vertInputData);
+                vk::PipelineInputAssemblyStateCreateInfo vertAsmInfo{};
+                vertAsmInfo = vertShader.getInputAssemblyInfo();
+                auto viewportData = get_viewport_info(renderpass.renderExtent_.width, renderpass.renderExtent_.height);
+                vk::PipelineViewportStateCreateInfo viewportInfo{};
+                viewportInfo.setViewports(viewportData.viewport);
+                viewportInfo.setScissors(viewportData.scissor);
+                const auto& fragShader = fragFactory_.propagateShader(subpass.propagateFragShaderIdx());
+                vk::PipelineDepthStencilStateCreateInfo depthInfo{};
+                depthInfo = fragShader.getDepthStencilInfo();
+                vk::PipelineMultisampleStateCreateInfo msaaInfo{};
+                msaaInfo = fragShader.getMSAAInfo();
+                vk::PipelineRasterizationStateCreateInfo rastInfo{};
+                rastInfo = vertShader.getRasterizationInfo();
+                vk::PipelineColorBlendStateCreateInfo blendInfo{};
+                blendInfo = fragShader.propagateColorBlendInfo();
+                // We need the order of attachment references back when creating the renderpass.
+                //  As long as we don't use std::unordered_map, things should be fine
+                std::vector<vk::PipelineColorBlendAttachmentState> colorInfos{};
+                for (const auto& attachRef: renderpass.attachmentReferences_.at(subpassId.first)){
+                    if (attachRef.second.attachType == factory::AttachmentType::eColor){
+                        colorInfos.push_back(attachRef.second.blendInfo);
+                    }
+                }
+                blendInfo.setAttachments(colorInfos);
+                auto pipelineLayout = subpass.getPipelineLayout();
+                vk::GraphicsPipelineCreateInfo graphPipeInfo{};
+                graphPipeInfo.flags = {};
+                graphPipeInfo.setStages(shaderStages);
+                graphPipeInfo.pVertexInputState = &vertInputInfo;
+                graphPipeInfo.pInputAssemblyState = &vertAsmInfo;
+                graphPipeInfo.pTessellationState = nullptr;
+                graphPipeInfo.pViewportState = &viewportInfo;
+                graphPipeInfo.pRasterizationState = &rastInfo;
+                graphPipeInfo.pMultisampleState = &msaaInfo;
+                graphPipeInfo.pDepthStencilState = &depthInfo;
+                graphPipeInfo.pColorBlendState = &blendInfo;
+                graphPipeInfo.pDynamicState = nullptr;
+                graphPipeInfo.layout = pipelineLayout;
+                graphPipeInfo.renderPass = vkRenderPass;
+                graphPipeInfo.subpass = subpassId.first;
+                graphPipeInfo.basePipelineHandle = nullptr;
+                graphPipeInfo.basePipelineIndex = 0;
+                auto [result, graphPipeline] = device_.createGraphicsPipelineUnique(nullptr, graphPipeInfo);
+                utils::vk_ensure(result);
+                subpass.pipeline_ = std::move(graphPipeline);
+            }
 
+        }
+    }
 private:
     RenderResourceManager &resMgr_;
-    const SubpassFactory &subpassFactory_;
-    const VertexShaderFactory &vertFactory_;
-    const FragmentShaderFactory &fragFactory_;
+    SubpassFactory &subpassFactory_;
+    VertexShaderFactory &vertFactory_;
+    FragmentShaderFactory &fragFactory_;
     std::map<RenderpassIdx, RenderpassBase> renderpasses_{};
     std::unordered_map<std::string, RenderpassIdx> renderpassLUT_{};
     vk::Device device_{};

@@ -343,11 +343,44 @@ class SubpassBase{
 public:
     using DescSetIdx = factory::DescSetIdx;
     using ShaderIdx = factory::ShaderIdx;
-    typedef uint64_t StageMask;
+    using StageMask = factory::StageMask;
+    using ShaderStage = factory::ShaderStage;
     [[nodiscard]] std::tuple<DescSetIdx, vk::DescriptorSetLayoutBinding> queryResourceBinding(const std::string &resName) const{
-        const auto& descInfo = pipelineDescriptorInfo_.at(resourceBindingLUT_.at(resName));
+        const auto& descInfo = pipelineDescriptorInfo_.at(resourceDescriptorBindingLUT_.at(resName));
         return std::make_tuple(descInfo.set, descInfo.desc);
     }
+
+    [[nodiscard]] vk::DescriptorSetLayout getDescriptorSetLayout(DescSetIdx setIndex){
+        if (descriptorLayouts_.empty()){
+            createAllDescriptorSetLayouts();
+        }
+        return descriptorLayouts_.at(setIndex).get();
+    }
+
+    [[nodiscard]] vk::PipelineLayout getPipelineLayout() {
+        if (!static_cast<bool>(pipelineLayout_)){
+            // For pipeline layout, Vulkan API requires structured info, while we only have individual bindings
+            vk::PipelineLayoutCreateInfo layoutInfo{};
+            // We force that all entries need to be bound for now
+            std::vector<vk::PushConstantRange> pushes{};
+            for (const auto& pushInfo: propagatePushConstantInfos()){
+                pushes.push_back(pushInfo.second.getPushBlockRange());
+            }
+            layoutInfo.setPushConstantRanges(pushes);
+            // For descriptors, we don't need to worry about the order
+            auto descLayouts = getAllDescriptorSetLayouts();
+            std::vector<vk::DescriptorSetLayout> layouts{};
+            for (const auto& layout: descLayouts){
+                layouts.push_back(layout.second);
+            }
+            layoutInfo.setSetLayouts(layouts);
+            auto [result, pipeLayout] = device_.createPipelineLayoutUnique(layoutInfo);
+            utils::vk_ensure(result);
+            pipelineLayout_ = std::move(pipeLayout);
+        }
+        return pipelineLayout_.get();
+    }
+
     [[nodiscard]] ShaderIdx propagateVertShaderIdx() const{
         return vertex_;
     }
@@ -356,6 +389,9 @@ public:
     }
     [[nodiscard]] StageMask propagateEnabledStages() const{
         return stages_;
+    }
+    [[nodiscard]] const std::unordered_map<std::string, factory::PushConstantInfo>& propagatePushConstantInfos() const{
+        return pushConstsInfo_;
     }
     explicit SubpassBase(vk::Device device){
         device_ = device;
@@ -368,36 +404,47 @@ protected:
     using AttachmentReferenceInfo = factory::AttachmentReferenceInfo;
     std::unordered_map<std::string, AttachmentReferenceInfo> subpassAttachmentReferenceInfo_{};
     // Info modified by current level factories only
-
     ShaderIdx vertex_{}, fragment_{};
     using ShaderDescriptorInfo = factory::ShaderDescriptorInfo;
-    std::unordered_map<std::string, ShaderDescriptorInfo> pipelineDescriptorInfo_{};
-
-    enum ShaderStage: uint64_t {
-        eNone                   = 0b0LLU,
-        eVertex                 = 0b1LLU,
-//        eTessellationControl    = 0b10LLU,
-//        eTessellationEvaluation = 0b100LLU,
-//        eGeometry               = 0b1000LLU,
-        eFragment               = 0b10000LLU,
-        eCompute                = 0b100000LLU,
-//        eRaygenKHR              = 0b1000000LLU,
-//        eAnyHitKHR              = 0b10000000LLU,
-//        eClosestHitKHR          = 0b100000000LLU,
-//        eMissKHR                = 0b1000000000LLU,
-//        eIntersectionKHR        = 0b10000000000LLU,
-//        eCallableKHR            = 0b100000000000LLU,
-//        eTaskEXT                = 0b1000000000000LLU,
-//        eMeshEXT                = 0b10000000000000LLU,
-        eFull                   = 0xFFFFFFFFFFFFFFFFLLU
-    };
+    typedef std::string VariableName;
+    std::unordered_map<VariableName, ShaderDescriptorInfo> pipelineDescriptorInfo_{};
     StageMask stages_{};
 private:
+    [[nodiscard]] std::map<DescSetIdx , vk::DescriptorSetLayout> getAllDescriptorSetLayouts(){
+        if (descriptorLayouts_.empty()){
+            createAllDescriptorSetLayouts();
+        }
+        std::map<DescSetIdx , vk::DescriptorSetLayout> result{};
+        for (const auto& layout: descriptorLayouts_){
+            result[layout.first] = layout.second.get();
+        }
+        return result;
+    }
+    void createAllDescriptorSetLayouts(){
+        descriptorLayouts_.clear();
+        // First slice bindings by set index, then create layout for each set
+        std::map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> setBindings{};
+        for (const auto& bind: pipelineDescriptorInfo_){
+            setBindings[bind.second.set].push_back(bind.second.desc);
+        }
+        for (const auto& bindings: setBindings){
+            vk::DescriptorSetLayoutCreateInfo layoutInfo{};
+            layoutInfo.setBindings(bindings.second);
+            auto [result, layout] = device_.createDescriptorSetLayoutUnique(layoutInfo);
+            utils::vk_ensure(result);
+            descriptorLayouts_.try_emplace(bindings.first, std::move(layout));
+        }
+    }
+
     vk::Device device_{};
     vk::UniquePipeline pipeline_{};
     vk::UniquePipelineLayout pipelineLayout_{};
-    std::unordered_map<std::string, std::string> resourceBindingLUT_{};
+    std::map<DescSetIdx, vk::UniqueDescriptorSetLayout> descriptorLayouts_{};
+    typedef std::string DescName;
+    std::unordered_map<std::string, DescName> resourceDescriptorBindingLUT_{};
+    std::unordered_map<std::string, factory::PushConstantInfo> pushConstsInfo_{};
     friend class SubpassFactory;
+    friend class RenderpassFactory;
 };
 // Also helps building a pipeline
 // The twisted Vulkan API requires that a Pipeline object must be tied to a Renderpass object upon creation
@@ -453,9 +500,10 @@ public:
     void registerSubpass(const std::string &subpassName){
         subpassDict_[subpassName] = {};
         subpassDict_[subpassName].stages_ = ShaderStage::eNone;
+        subpassDict_[subpassName].device_ = device_;
     }
 
-    [[nodiscard]] const SubpassBase& propagateSubpass(const std::string &subpassName) const{
+    [[nodiscard]] SubpassBase& propagateSubpass(const std::string &subpassName) {
         return subpassDict_.at(subpassName);
     }
 
@@ -477,6 +525,7 @@ public:
         assert(shaderStagesFilled(subpass));
         gatherAttachmentReferences(subpass);
         gatherDescriptorSetLayouts(subpass);
+        gatherPushConstants(subpass);
     }
 
     //TODO: Don't use std::string as resource's ID here, it is too confusing
@@ -484,7 +533,13 @@ public:
         auto& subpass = subpassDict_.at(subpassName);
         assert(shaderStagesFilled(subpass));
         subpass.pipelineDescriptorInfo_.at(descriptorName).resName = resourceName;
-        subpass.resourceBindingLUT_[resourceName] = descriptorName;
+        subpass.resourceDescriptorBindingLUT_[resourceName] = descriptorName;
+    }
+
+    void linkPushConstantWithResourceName(const std::string &subpassName, const std::string &pushConstBlockName, const std::string &resourceName){
+        auto& subpass = subpassDict_.at(subpassName);
+        assert(shaderStagesFilled(subpass));
+        subpass.pushConstsInfo_.at(pushConstBlockName).resName = resourceName;
     }
 
 private:
@@ -523,6 +578,29 @@ private:
             const auto& shader = fragFactory_.propagateShader(subpass.fragment_);
             for (const auto& desc : shader.propagateDescriptors()){
                 subpass.pipelineDescriptorInfo_[desc.first] = desc.second;
+            }
+        }
+    }
+
+    void gatherPushConstants(SubpassBase& subpass){
+        subpass.pushConstsInfo_ = {};
+        const auto& stages = subpass.stages_;
+        // Vertex
+        if ((ShaderStage::eVertex&stages)==ShaderStage::eVertex){
+            const auto& shader = vertFactory_.propagateShader(subpass.vertex_);
+            const auto& push = shader.propagatePushConstantBlock();
+            subpass.pushConstsInfo_[push.blockName] = push;
+        }
+        // Fragment
+        if ((ShaderStage::eFragment&stages)==ShaderStage::eFragment){
+            const auto& shader = fragFactory_.propagateShader(subpass.fragment_);
+            const auto& push = shader.propagatePushConstantBlock();
+            if (subpass.pushConstsInfo_.contains(push.blockName)){
+                // Handle aliasing, here we just merge them by member name
+                subpass.pushConstsInfo_.at(push.blockName).stages |= push.stages;
+                for (const auto& pushMember: push.members){
+                    subpass.pushConstsInfo_.at(push.blockName).members[pushMember.first] = pushMember.second;
+                }
             }
         }
     }

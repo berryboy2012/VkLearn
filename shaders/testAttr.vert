@@ -3,6 +3,11 @@ struct InTestStruct {
     vec3 inVec;
     mat4 inMat;
 };
+layout(push_constant) uniform constants{
+    mat4 view;
+    layout(offset=128) mat4 proj;
+} sceneVP;
+
 layout (location = 0) in mat4 inMatrixTest;
 layout(location = 4) in vec3 inPosition;
 layout(location = 5) in dvec4 inColor;
@@ -15,10 +20,6 @@ struct Particle {
     vec2 velocity;
     vec4 color;
 };
-layout(push_constant) uniform constants{
-    mat4 view;
-    mat4 proj;
-} sceneVP;
 
 layout(binding = 0) uniform ModelUB {
     mat4 model;

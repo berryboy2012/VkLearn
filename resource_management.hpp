@@ -25,6 +25,12 @@ public:
     struct Pixel{
         uint8_t r, g, b, a;
     };
+    [[nodiscard]] const vk::ImageCreateInfo& getImageInfo() const{
+        return data_.resInfo;
+    }
+    [[nodiscard]] std::span<const Pixel> getImageHostData() const{
+        return {(Pixel*)pixels_, extent_.width*extent_.height*extent_.depth};
+    }
 
     explicit TextureObject(const std::string &filePath, VulkanResourceManager &resMgrRef){
         {
@@ -105,12 +111,14 @@ public:
     RenderResourceManager(vk::Device device, VulkanResourceManager &manager): device_(device), memMgr_(manager) {
         queueIdxCGTP_ = memMgr_.queueIdxCGTP_;
     }
-
+    ~RenderResourceManager(){
+        destroyAllResources();
+    }
     void createBuffer(const std::string &resourceName, size_t bufferByteSize, vk::BufferUsageFlags usage, vma::AllocationCreateFlags vmaFlag){
         assert(!resources_.contains(resourceName));
         resources_.try_emplace(resourceName, VulkanResource(ResourceType::eBuffer, resourceName, queueIdxCGTP_));
         resourceDependencies_[resourceName] = {};
-        auto memObj = memMgr_.createBuffernMemory(bufferByteSize, usage, vmaFlag);
+        auto memObj = memMgr_.createBuffernMemory(bufferByteSize, usage|vk::BufferUsageFlagBits::eTransferDst, vmaFlag);
         auto& res = resources_.at(resourceName).getBufferHandle();
         res.resInfo = memObj.resInfo;
         res.resource = memObj.resource.release();
@@ -126,7 +134,7 @@ public:
         assert(!resources_.contains(resourceName));
         resources_.try_emplace(resourceName, VulkanResource(ResourceType::eImage, resourceName, queueIdxCGTP_));
         resourceDependencies_[resourceName] = {};
-        auto memObj = memMgr_.createImagenMemory(extent, format, tiling, vk::ImageLayout::eUndefined, usage, vmaFlag);
+        auto memObj = memMgr_.createImagenMemory(extent, format, tiling, vk::ImageLayout::eUndefined, usage|vk::ImageUsageFlagBits::eTransferDst, vmaFlag);
         auto& res = resources_.at(resourceName).getImageHandle();
         res.resInfo = memObj.resInfo;
         res.resource = memObj.resource.release();
@@ -201,6 +209,12 @@ public:
         res.isViewManaged = false;
     }
 
+    void updatePhantomView(const std::string &resourceName, vk::ImageView view){
+        assert(resources_.contains(resourceName));
+        auto& res = resources_.at(resourceName).getImageHandle();
+        res.view = view;
+    }
+
     [[nodiscard]] vk::ImageLayout getImageLayout(const std::string &resourceName){
         assert(resources_.contains(resourceName));
         auto& res = resources_.at(resourceName).getImageHandle();
@@ -220,6 +234,71 @@ public:
     }
 
 private:
+    void destroyAllResources(){
+        bool resourceListChanged;
+        do {
+            resourceListChanged = false;
+            std::vector<std::string> resourceList{};
+            for(const auto& res: resources_){
+                resourceList.push_back(res.first);
+            }
+            for (const auto& resName: resourceList){
+                if(destroyResource(resName)){
+                    resourceListChanged = true;
+                }
+            }
+        } while(resourceListChanged);
+    }
+    bool destroyResource(const std::string &resourceName){
+        // first check dependencies
+        for (const auto& depend: resourceDependencies_){
+            for (const auto& dependLeaf: depend.second){
+                if (dependLeaf == resourceName){
+                    return false;
+                }
+            }
+        }
+        auto& resource = resources_.at(resourceName);
+        switch (resource.getResourceType()) {
+            case ResourceType::eBuffer:{
+                auto& res = resource.getBufferHandle();
+                if (res.isResourceManaged){
+                    if (res.isMemManaged){
+                        memMgr_.allocator_.destroyBuffer(res.resource, res.mem);
+                    } else {
+                        device_.destroy(res.resource);
+                    }
+                }
+                resources_.erase(resourceName);
+                resourceDependencies_.erase(resourceName);
+                return true;
+            }
+                break;
+            case ResourceType::eImage:{
+                auto& res = resource.getImageHandle();
+                if (res.isSamplerManaged){
+                    device_.destroy(res.sampler);
+                }
+                if (res.isViewManaged){
+                    device_.destroy(res.view);
+                }
+                if (res.isResourceManaged){
+                    if (res.isMemManaged){
+                        memMgr_.allocator_.destroyImage(res.resource, res.mem);
+                    } else {
+                        device_.destroy(res.resource);
+                    }
+                }
+                resources_.erase(resourceName);
+                resourceDependencies_.erase(resourceName);
+                return true;
+            }
+                break;
+            default:
+                assert(("Only buffer and image allowed", false));
+                std::abort();
+        }
+    }
     std::unordered_map<std::string, VulkanResource> resources_{};
     std::unordered_map<std::string, std::vector<std::string>> resourceDependencies_{};
     vk::Device device_{};
