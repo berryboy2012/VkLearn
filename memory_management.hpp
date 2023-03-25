@@ -21,6 +21,7 @@
 #include "vk_mem_alloc.hpp"
 #include "utils.h"
 #include "global_objects.hpp"
+#include "shader_modules.hpp"
 
 // The lifetime of vk::Buffer and vk::Image has some degree of freedom, we need to keep track of some information.
 struct VulkanBufferMemory{
@@ -44,34 +45,7 @@ struct VulkanBufferMemory{
         return *this;
     }
 };
-vk::ImageViewCreateInfo image_view_info_builder(
-        vk::Image image, vk::ImageType imageType, vk::Format format, uint32_t mipLevelCount, uint32_t imgCount,
-        const vk::ImageAspectFlags imageAspect){
-    vk::ImageViewCreateInfo createInfo = {};
-    createInfo.image = image;
-    switch (imageType) {
-        case vk::ImageType::e1D:
-            createInfo.viewType = vk::ImageViewType::e1D;
-            break;
-        case vk::ImageType::e2D:
-            createInfo.viewType = vk::ImageViewType::e2D;
-            break;
-        case vk::ImageType::e3D:
-            createInfo.viewType = vk::ImageViewType::e3D;
-            break;
-    }
-    createInfo.format = format;
-    createInfo.components.r = vk::ComponentSwizzle::eIdentity;
-    createInfo.components.g = vk::ComponentSwizzle::eIdentity;
-    createInfo.components.b = vk::ComponentSwizzle::eIdentity;
-    createInfo.components.a = vk::ComponentSwizzle::eIdentity;
-    createInfo.subresourceRange.aspectMask = imageAspect;
-    createInfo.subresourceRange.baseMipLevel = 0;
-    createInfo.subresourceRange.levelCount = mipLevelCount;
-    createInfo.subresourceRange.baseArrayLayer = 0;
-    createInfo.subresourceRange.layerCount = imgCount;
-    return createInfo;
-}
+
 struct VulkanImageMemory{
     vk::Device device{};
     vk::UniqueHandle<vma::Allocation,vma::Dispatcher> mem{};
@@ -98,7 +72,7 @@ struct VulkanImageMemory{
         return *this;
     }
     void createView(const vk::ImageAspectFlags imageAspect){
-        auto createInfo = image_view_info_builder(
+        auto createInfo = factory::image_view_info_builder(
                 resource.get(),
                 resInfo.imageType, resInfo.format, resInfo.mipLevels, resInfo.arrayLayers,
                 imageAspect);

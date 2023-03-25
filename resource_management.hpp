@@ -167,6 +167,12 @@ public:
         res.isSamplerManaged = true;
     }
 
+    template<class ValueType>
+    void createPushConst(const std::string &resourceName){
+        assert(!resources_.contains(resourceName));
+        resources_.try_emplace(resourceName, VulkanResource::createPushConst<ValueType>(resourceName, queueIdxCGTP_));
+    }
+
     template<class HostElementType>
     void copyDataHostToDevice(const std::string &resourceName, const std::span<const HostElementType> hostData){
         auto& resource = resources_.at(resourceName);
@@ -185,8 +191,13 @@ public:
                         res.resInfo.mipLevels, res.resInfo.arrayLayers, vk::ImageAspectFlagBits::eColor,
                         res.currentLayout, res.resource, res.resInfo.extent);
             } break;
+            case ResourceType::ePushConst:{
+                auto& res = resource.getPushConstHandle();
+                assert(hostData.size_bytes()==res.byteSize);
+                std::memcpy(res.resource, hostData.data(), res.byteSize);
+            } break;
             default:
-                assert(("Copy destination can only be buffer or image",false));
+                assert(("Copy destination can only be buffer, image or push-constants",false));
         }
     }
 
@@ -294,8 +305,14 @@ private:
                 return true;
             }
                 break;
+            case ResourceType::ePushConst:{
+                //Auto managed by internal unique_ptr
+                resources_.erase(resourceName);
+                resourceDependencies_.erase(resourceName);
+                return true;
+            } break;
             default:
-                assert(("Only buffer and image allowed", false));
+                assert(("Only buffer image and push-constant allowed", false));
                 std::abort();
         }
     }

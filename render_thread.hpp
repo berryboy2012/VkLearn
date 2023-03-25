@@ -5,6 +5,8 @@
 #ifndef VKLEARN_RENDER_THREAD_HPP
 #define VKLEARN_RENDER_THREAD_HPP
 
+#include "shader_modules.hpp"
+
 void render_work_thread(
         size_t inflightIndex,
         vk::Instance inst, vk::PhysicalDevice physDev, PhysicalDeviceInfo devProps, vk::Device renderDev,

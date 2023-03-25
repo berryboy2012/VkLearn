@@ -4,6 +4,20 @@
 
 #ifndef VKLEARN_SHADER_MODULES_HPP
 #define VKLEARN_SHADER_MODULES_HPP
+
+#include "global_objects.hpp"
+#include "commands_management.h"
+#include <iostream>
+#include <functional>
+#include <any>
+#include <fstream>
+#include <format>
+#include <map>
+#include <optional>
+#include "glm/glm.hpp"
+#include "spirv_glsl.hpp"
+#include <concepts>
+
 #ifndef VULKAN_HPP_NO_EXCEPTIONS
 #define VULKAN_HPP_NO_EXCEPTIONS
 #endif
@@ -69,11 +83,12 @@ namespace factory {
         eImage = 2,
         //eImagelessView = 3,
         //eCombinedImageSampler = 4,
-        eAccelStruct = 5,
-        eCount = 6
+        ePushConst = 3,
+        eAccelStruct = 4,
+        eCount = 5
     };
 
-    template<ResourceType resT>
+    template<ResourceType>
     struct VulkanConcreteResource {
         std::string resName{};
     };
@@ -110,6 +125,46 @@ namespace factory {
     };
 
     template<>
+    struct VulkanConcreteResource<ResourceType::ePushConst> {
+        std::string resName{};
+        size_t byteSize{};
+        VulkanConcreteResource(const VulkanConcreteResource& other) {
+            *this = other;
+        }
+        VulkanConcreteResource(VulkanConcreteResource&& other) noexcept {
+            *this = std::move(other);
+        }
+        VulkanConcreteResource& operator=(const VulkanConcreteResource& other) {
+            if (this != &other){
+                resName = other.resName;
+                mem.reset();
+                resource = other.resource;
+                isMemManaged = false;
+                byteSize = other.byteSize;
+            }
+            return *this;
+        }
+        VulkanConcreteResource& operator=(VulkanConcreteResource<ResourceType::ePushConst> &&other){
+            if (this != &other){
+                resName = other.resName;
+                mem = std::move(other.mem);
+                resource = other.resource;
+                other.resource = nullptr;
+                isMemManaged = other.isMemManaged;
+                byteSize = other.byteSize;
+            }
+            return *this;
+        }
+        explicit VulkanConcreteResource(size_t size): byteSize(size), isMemManaged(true) {
+            mem = std::make_unique<char[]>(size);
+            resource = mem.get();
+        }
+        bool isMemManaged;
+        void* resource{};
+        std::unique_ptr<char[]> mem ;
+    };
+
+    template<>
     struct VulkanConcreteResource<ResourceType::eAccelStruct> {
         std::string resName{};
         vma::Allocation mem{};
@@ -126,6 +181,7 @@ namespace factory {
     class VulkanResource{
     public:
         VulkanResource() = delete;
+
         VulkanResource(ResourceType resourceType, const std::string &resourceName, uint32_t queueFamilyIndex): resType_(resourceType){
             switch (resType_) {
                 case ResourceType::eBuffer:
@@ -134,12 +190,22 @@ namespace factory {
                 case ResourceType::eImage:
                     resStruct_ = VulkanConcreteResource<ResourceType::eImage>{.resName = resourceName, .queueFamIdx = queueFamilyIndex};
                     break;
+                case ResourceType::ePushConst:
+                    // We can't input template parameters directly here.
+                    break;
                 case ResourceType::eAccelStruct:
                     resStruct_ = VulkanConcreteResource<ResourceType::eAccelStruct>{.resName = resourceName, .queueFamIdx = queueFamilyIndex};
                     break;
                 default:
                     resStruct_ = VulkanConcreteResource<ResourceType::eUndefined>{.resName = resourceName};
             }
+        }
+
+        template<class ValueType>
+        static VulkanResource createPushConst(const std::string &resourceName, uint32_t queueFamilyIndex){
+            VulkanResource res{ResourceType::ePushConst, resourceName, queueFamilyIndex};
+            res.resStruct_ = std::move(VulkanConcreteResource<ResourceType::ePushConst>{sizeof(ValueType)});
+            return std::move(res);
         }
 
         [[nodiscard]] VulkanConcreteResource<ResourceType::eBuffer>& getBufferHandle(){
@@ -150,6 +216,11 @@ namespace factory {
         [[nodiscard]] VulkanConcreteResource<ResourceType::eImage>& getImageHandle(){
             assert(resType_==ResourceType::eImage);
             return std::any_cast<VulkanConcreteResource<ResourceType::eImage>&>(resStruct_);
+        }
+
+        [[nodiscard]] VulkanConcreteResource<ResourceType::ePushConst>& getPushConstHandle(){
+            assert(resType_==ResourceType::ePushConst);
+            return std::any_cast<VulkanConcreteResource<ResourceType::ePushConst>&>(resStruct_);
         }
 
         [[nodiscard]] VulkanConcreteResource<ResourceType::eAccelStruct>& getAccelStructHandle(){
@@ -604,6 +675,35 @@ namespace factory {
         viewInfo.subresourceRange.layerCount = arrayLayers;
         return viewInfo;
     }
+
+vk::ImageViewCreateInfo image_view_info_builder(
+        vk::Image image, vk::ImageType imageType, vk::Format format, uint32_t mipLevelCount, uint32_t imgCount,
+        const vk::ImageAspectFlags imageAspect){
+    vk::ImageViewCreateInfo createInfo = {};
+    createInfo.image = image;
+    switch (imageType) {
+        case vk::ImageType::e1D:
+            createInfo.viewType = vk::ImageViewType::e1D;
+            break;
+        case vk::ImageType::e2D:
+            createInfo.viewType = vk::ImageViewType::e2D;
+            break;
+        case vk::ImageType::e3D:
+            createInfo.viewType = vk::ImageViewType::e3D;
+            break;
+    }
+    createInfo.format = format;
+    createInfo.components.r = vk::ComponentSwizzle::eIdentity;
+    createInfo.components.g = vk::ComponentSwizzle::eIdentity;
+    createInfo.components.b = vk::ComponentSwizzle::eIdentity;
+    createInfo.components.a = vk::ComponentSwizzle::eIdentity;
+    createInfo.subresourceRange.aspectMask = imageAspect;
+    createInfo.subresourceRange.baseMipLevel = 0;
+    createInfo.subresourceRange.levelCount = mipLevelCount;
+    createInfo.subresourceRange.baseArrayLayer = 0;
+    createInfo.subresourceRange.layerCount = imgCount;
+    return createInfo;
+}
 }
 // Push constants seems to be slower than UBO
 struct ScenePushConstants {
