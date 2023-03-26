@@ -148,8 +148,8 @@ public:
     void createViewForImage(const std::string &resourceName, const vk::ImageAspectFlags imageAspect){
         assert(resources_.contains(resourceName));
         auto& res = resources_.at(resourceName).getImageHandle();
-        auto viewInfo = factory::image_view_create_info_builder(res.resource, res.resInfo.imageType, res.resInfo.format,
-                                                       imageAspect, res.resInfo.mipLevels, res.resInfo.arrayLayers);
+        auto viewInfo = factory::image_view_info_builder(res.resource, res.resInfo.imageType, res.resInfo.format,
+                                                       res.resInfo.mipLevels, res.resInfo.arrayLayers, imageAspect);
         res.viewInfo = viewInfo;
         auto [result, view] = device_.createImageView(viewInfo);
         utils::vk_ensure(result);
@@ -173,18 +173,30 @@ public:
         resources_.try_emplace(resourceName, VulkanResource::createPushConst<ValueType>(resourceName, queueIdxCGTP_));
     }
 
+    template<class ValueType>
+    ValueType getPushConstData(const std::string &resourceName){
+        assert(resources_.contains(resourceName));
+        const auto& res = resources_.at(resourceName).getPushConstHandle();
+        assert(sizeof(ValueType)==res.byteSize);
+        ValueType result{};
+        std::memcpy(&result, res.resource, res.byteSize);
+        return result;
+    }
+
     template<class HostElementType>
-    void copyDataHostToDevice(const std::string &resourceName, const std::span<const HostElementType> hostData){
+    void copyDataToResource(const std::string &resourceName, const std::span<const HostElementType> hostData){
         auto& resource = resources_.at(resourceName);
         vk::DeviceSize bufferSize = hostData.size_bytes();
-        auto stagingBuffer = memMgr_.createStagingBuffer(bufferSize);
-        std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
         switch (resource.getResourceType()) {
             case ResourceType::eBuffer:{
+                auto stagingBuffer = memMgr_.createStagingBuffer(bufferSize);
+                std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
                 auto& res = resource.getBufferHandle();
                 memMgr_.copyBuffer(stagingBuffer.resource.get(), res.resource, bufferSize);
             } break;
             case ResourceType::eImage:{
+                auto stagingBuffer = memMgr_.createStagingBuffer(bufferSize);
+                std::memcpy(stagingBuffer.auxInfo.pMappedData, hostData.data(), bufferSize);
                 auto& res = resource.getImageHandle();
                 res.currentLayout = memMgr_.copyImageFromBuffer(
                         stagingBuffer.resource.get(),

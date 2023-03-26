@@ -326,7 +326,7 @@ public:
         framebufferInfo.width = renderExtent_.width;
         framebufferInfo.height = renderExtent_.height;
         framebufferInfo.layers = 1;
-        framebufferInfo.flags |= vk::FramebufferCreateFlagBits::eImageless;
+        framebufferInfo.flags = vk::FramebufferCreateFlagBits::eImageless;
         framebufferInfo.attachmentCount = attachmentsInfo.attachmentImageInfoCount;
         framebufferInfo.pAttachments = VK_NULL_HANDLE;
         framebufferInfo.pNext = &attachmentsInfo;

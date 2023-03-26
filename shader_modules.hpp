@@ -647,68 +647,42 @@ namespace factory {
         vk::PipelineColorBlendAttachmentState blendInfo{};
     };
 
-    vk::ImageViewCreateInfo image_view_create_info_builder(
-            vk::Image image, vk::ImageType imageType, vk::Format format,
-            vk::ImageAspectFlags imageAspect, uint32_t mipLevels, uint32_t arrayLayers){
-        vk::ImageViewCreateInfo viewInfo{};
-        viewInfo.image = image;
+    vk::ImageViewCreateInfo image_view_info_builder(
+            vk::Image image, vk::ImageType imageType, vk::Format format, uint32_t mipLevelCount, uint32_t imgCount,
+            const vk::ImageAspectFlags imageAspect){
+        vk::ImageViewCreateInfo createInfo = {};
+        createInfo.image = image;
         switch (imageType) {
             case vk::ImageType::e1D:
-                viewInfo.viewType = vk::ImageViewType::e1D;
+                createInfo.viewType = vk::ImageViewType::e1D;
                 break;
             case vk::ImageType::e2D:
-                viewInfo.viewType = vk::ImageViewType::e2D;
+                createInfo.viewType = vk::ImageViewType::e2D;
                 break;
             case vk::ImageType::e3D:
-                viewInfo.viewType = vk::ImageViewType::e3D;
+                createInfo.viewType = vk::ImageViewType::e3D;
                 break;
         }
-        viewInfo.format = format;
-        viewInfo.components.r = vk::ComponentSwizzle::eIdentity;
-        viewInfo.components.g = vk::ComponentSwizzle::eIdentity;
-        viewInfo.components.b = vk::ComponentSwizzle::eIdentity;
-        viewInfo.components.a = vk::ComponentSwizzle::eIdentity;
-        viewInfo.subresourceRange.aspectMask = imageAspect;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = mipLevels;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = arrayLayers;
-        return viewInfo;
+        createInfo.format = format;
+        createInfo.components.r = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.g = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.b = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.a = vk::ComponentSwizzle::eIdentity;
+        createInfo.subresourceRange.aspectMask = imageAspect;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = mipLevelCount;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = imgCount;
+        return createInfo;
     }
-
-vk::ImageViewCreateInfo image_view_info_builder(
-        vk::Image image, vk::ImageType imageType, vk::Format format, uint32_t mipLevelCount, uint32_t imgCount,
-        const vk::ImageAspectFlags imageAspect){
-    vk::ImageViewCreateInfo createInfo = {};
-    createInfo.image = image;
-    switch (imageType) {
-        case vk::ImageType::e1D:
-            createInfo.viewType = vk::ImageViewType::e1D;
-            break;
-        case vk::ImageType::e2D:
-            createInfo.viewType = vk::ImageViewType::e2D;
-            break;
-        case vk::ImageType::e3D:
-            createInfo.viewType = vk::ImageViewType::e3D;
-            break;
-    }
-    createInfo.format = format;
-    createInfo.components.r = vk::ComponentSwizzle::eIdentity;
-    createInfo.components.g = vk::ComponentSwizzle::eIdentity;
-    createInfo.components.b = vk::ComponentSwizzle::eIdentity;
-    createInfo.components.a = vk::ComponentSwizzle::eIdentity;
-    createInfo.subresourceRange.aspectMask = imageAspect;
-    createInfo.subresourceRange.baseMipLevel = 0;
-    createInfo.subresourceRange.levelCount = mipLevelCount;
-    createInfo.subresourceRange.baseArrayLayer = 0;
-    createInfo.subresourceRange.layerCount = imgCount;
-    return createInfo;
-}
 }
 // Push constants seems to be slower than UBO
 struct ScenePushConstants {
     glm::mat4 view;
     glm::mat4 proj;
+    bool operator==(const ScenePushConstants &rhs) const{
+        return (view == rhs.view) & (proj == rhs.proj);
+    }
 };
 struct ModelUBO {
     glm::mat4 model;

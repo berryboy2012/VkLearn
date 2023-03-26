@@ -345,6 +345,15 @@ public:
     using ShaderIdx = factory::ShaderIdx;
     using StageMask = factory::StageMask;
     using ShaderStage = factory::ShaderStage;
+
+    [[nodiscard]] std::map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> getAllDescriptorBindings() const{
+        std::map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> result{};
+        for (const auto& binding: pipelineDescriptorInfo_){
+            result[binding.second.set].push_back(binding.second.desc);
+        }
+        return result;
+    }
+
     [[nodiscard]] std::tuple<DescSetIdx, vk::DescriptorSetLayoutBinding> queryResourceBinding(const std::string &resName) const{
         const auto& descInfo = pipelineDescriptorInfo_.at(resourceDescriptorBindingLUT_.at(resName));
         return std::make_tuple(descInfo.set, descInfo.desc);
@@ -451,6 +460,7 @@ private:
 // Thus the creation of vk::Pipeline object has to be postponed to much later
 class SubpassFactory{
 public:
+    using DescSetIdx = factory::DescSetIdx;
     explicit SubpassFactory(vk::Device device, const VertexShaderFactory &vertShaderFactory, const FragmentShaderFactory &fragShaderFactory):
     device_(device),
     vertFactory_(vertShaderFactory),
@@ -540,6 +550,12 @@ public:
         auto& subpass = subpassDict_.at(subpassName);
         assert(shaderStagesFilled(subpass));
         subpass.pushConstsInfo_.at(pushConstBlockName).resName = resourceName;
+    }
+
+    [[nodiscard]] std::map<DescSetIdx, std::vector<vk::DescriptorSetLayoutBinding>> getPipelineDescriptorBindings(const std::string &subpassName) const {
+        auto& subpass = subpassDict_.at(subpassName);
+        assert(shaderStagesFilled(subpass));
+        return subpass.getAllDescriptorBindings();
     }
 
 private:
