@@ -96,13 +96,16 @@ void clean_sdl(SDL_Window *&window) {
 
 std::vector<std::string> get_required_validation_layers(bool enableValidationLayers) {
     auto validationLayers = std::vector<std::string>{"VK_LAYER_KHRONOS_validation"};
+    auto chosenLayers = std::vector<std::string>{};
     if (enableValidationLayers) {
         auto [layerResult, availableLayers] = vk::enumerateInstanceLayerProperties();
+        utils::vk_ensure(layerResult);
         for (const auto &requestedLayer: validationLayers) {
             bool layerFound = false;
             for (const auto &availableLayer: availableLayers) {
                 if (std::string_view(availableLayer.layerName) == requestedLayer) {
                     layerFound = true;
+                    chosenLayers.push_back(requestedLayer);
                     break;
                 }
             }
@@ -111,7 +114,7 @@ std::vector<std::string> get_required_validation_layers(bool enableValidationLay
             }
         }
     }
-    return validationLayers;
+    return chosenLayers;
 }
 
 std::vector<std::string> get_required_instance_extensions(SDL_Window *window, bool enableValidationLayers) {
