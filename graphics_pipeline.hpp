@@ -3,6 +3,7 @@
 //
 #ifndef VKLEARN_GRAPHICS_PIPELINE_HPP
 #define VKLEARN_GRAPHICS_PIPELINE_HPP
+#include "shader_modules.hpp"
 struct SubpassInfo{
     typedef size_t SubpassIdx;
     SubpassIdx index;

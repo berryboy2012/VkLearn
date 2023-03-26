@@ -49,13 +49,7 @@ struct PhysicalDeviceInfo {
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
 
-#include "shader_modules.hpp"
-#include "graphics_pipeline.hpp"
-#include "bindings_management.hpp"
-#include "renderpass.hpp"
-#include "commands_management.h"
 #include "memory_management.hpp"
-#include "resource_management.hpp"
 #include "render_thread.hpp"
 
 void query_ovr() {

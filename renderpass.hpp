@@ -5,7 +5,6 @@
 #ifndef VKLEARN_RENDERPASS_HPP
 #define VKLEARN_RENDERPASS_HPP
 
-#include "shader_modules.hpp"
 #include "graphics_pipeline.hpp"
 #include "resource_management.hpp"
 

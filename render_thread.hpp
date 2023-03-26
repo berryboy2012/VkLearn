@@ -6,7 +6,10 @@
 #define VKLEARN_RENDER_THREAD_HPP
 
 #include "shader_modules.hpp"
-
+#include "graphics_pipeline.hpp"
+#include "bindings_management.hpp"
+#include "resource_management.hpp"
+#include "renderpass.hpp"
 void render_work_thread(
         size_t inflightIndex,
         vk::Instance inst, vk::PhysicalDevice physDev, PhysicalDeviceInfo devProps, vk::Device renderDev,
@@ -234,7 +237,7 @@ void render_work_thread(
             exitSignal = true;
         }
         if (exitSignal) {
-            return;
+            break;
         }
         // Do pacing-sensitive work
         auto currentTime = std::chrono::high_resolution_clock::now();
@@ -259,7 +262,7 @@ void render_work_thread(
             }
         }
         if (exitSignal) {
-            return;
+            break;
         }
         auto swapchainImageViewHandle = mainRendererComms[inflightIndex].imageViewHandle.load();
 
@@ -308,6 +311,8 @@ void render_work_thread(
         mainRendererComms[inflightIndex].imageViewHandleConsumed.release();
         // After submit
     }
+    // Workaround for the lack of VK_EXT_swapchain_maintenance1 support
+    utils::vk_ensure(renderDev.waitIdle());
 }
 
 #endif //VKLEARN_RENDER_THREAD_HPP
