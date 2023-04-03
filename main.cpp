@@ -520,8 +520,9 @@ int main(int argc, char *argv[]) {
     auto instance = create_vulkan_instance(validationLayers, instanceExtensions);
     // Setup DynamicLoader (instance-wide)
     VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.get());
+    std::optional<vk::UniqueDebugUtilsMessengerEXT> vkDebugUtilMsg;
     if (bDebug) {
-        auto vkDebugUtilMsg = create_vulkan_debug_msg(instance.get());
+        vkDebugUtilMsg = create_vulkan_debug_msg(instance.get());
     }
 
     auto chosenPhysicalDevice = get_physical_device(instance.get());
