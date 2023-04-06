@@ -40,6 +40,7 @@ struct PhysicalDeviceInfo {
     vk::SurfaceKHR surface{};// Signify which surface are those info refer to
     std::vector<QueueFamilyProps> queueFamilies{};
     vk::PhysicalDeviceProperties2 props{};
+    std::vector<vk::ExtensionProperties> devExts{};
     std::unordered_map<vk::Format, vk::FormatProperties2> formats{};
     vk::SurfaceCapabilities2KHR surfaceCaps{};
     std::vector<vk::SurfaceFormat2KHR> surfaceFmts{};
@@ -134,6 +135,10 @@ std::vector<std::string> get_required_instance_extensions(SDL_Window *window, bo
 PhysicalDeviceInfo
 query_physical_device_info(const vk::PhysicalDevice chosenPhysicalDevice, vk::UniqueSurfaceKHR &surfaceSDL) {
     PhysicalDeviceInfo physicalDeviceProps{};
+    vk::Result vkAPIRes{};
+    physicalDeviceProps.props = chosenPhysicalDevice.getProperties2();
+    std::tie(vkAPIRes, physicalDeviceProps.devExts) = chosenPhysicalDevice.enumerateDeviceExtensionProperties();
+    utils::vk_ensure(vkAPIRes);
     physicalDeviceProps.surface = surfaceSDL.get();
     auto queueFamilies = chosenPhysicalDevice.getQueueFamilyProperties2();
     for (size_t i = 0; i < queueFamilies.size(); ++i) {
@@ -376,7 +381,7 @@ std::optional<uint32_t> find_qualified_queue_family(const PhysicalDeviceInfo &ph
 }
 
 vk::UniqueDevice
-create_vulkan_device(const vk::PhysicalDevice &chosenPhysicalDevice,
+create_vulkan_device(const vk::PhysicalDevice &chosenPhysicalDevice, const PhysicalDeviceInfo &physDevInfo,
                      const std::vector<std::any> &featureList, const std::vector<std::string> &deviceExtensions,
                      uint32_t queueCGTPIdx, size_t numQueues) {
     auto queuePriorities = std::vector<float>(numQueues, 1.0f);
@@ -390,6 +395,19 @@ create_vulkan_device(const vk::PhysicalDevice &chosenPhysicalDevice,
     auto pEnabledFeatures2 = &std::any_cast<const vk::PhysicalDeviceFeatures2 &>(featureList[0]);
     createInfo.pEnabledFeatures = nullptr;
     createInfo.pNext = (void *) pEnabledFeatures2;
+
+    for (const auto& devExt: deviceExtensions){
+        auto found=false;
+        for (const auto& availDevExt: physDevInfo.devExts){
+            if (availDevExt.extensionName == devExt){
+                found = true;
+                break;
+            }
+        }
+        if (!found){
+            utils::log_and_pause(std::format("Device extension not available: {}", devExt, 0));
+        }
+    }
 
     // Assemble deviceExtension
     auto [vecPtrDeviceExtension, extensionCount] = utils::stringToVecptrU32(deviceExtensions);
@@ -432,7 +450,7 @@ vk::SurfaceFormat2KHR find_qualified_surface_format_2(const std::span<const vk::
 vk::PresentModeKHR find_qualified_present_mode(const std::span<const vk::PresentModeKHR> surfacePresentModes) {
     vk::PresentModeKHR presentMode{};
     {
-        vk::PresentModeKHR preferredMode = vk::PresentModeKHR::eFifo;//Relaxed;
+        vk::PresentModeKHR preferredMode = vk::PresentModeKHR::eFifoRelaxed;
         presentMode = vk::PresentModeKHR::eFifo;
         for (const auto &availablePresentMode: surfacePresentModes) {
             if (availablePresentMode == preferredMode) {
@@ -542,7 +560,7 @@ int main(int argc, char *argv[]) {
         }
         queueFamilyIndex = queueFamIdx.value();
     }
-    device = create_vulkan_device(chosenPhysicalDevice, featureList, deviceExtensions, queueFamilyIndex, numQueues);
+    device = create_vulkan_device(chosenPhysicalDevice, physicalDeviceProps, featureList, deviceExtensions, queueFamilyIndex, numQueues);
     // Setup DynamicLoader (device-wide)
     VULKAN_HPP_DEFAULT_DISPATCHER.init(device.get());
     auto swapchainFormat = find_qualified_surface_format_2(physicalDeviceProps.surfaceFmts);
@@ -567,7 +585,8 @@ int main(int argc, char *argv[]) {
         swapchain = create_swapchain(device.get(), chosenPhysicalDevice,
                                      surfaceExtent, swapchainFormat, swapchainPresentMode, swapchainImageCount,
                                      surfaceSDL.get(), swapchain.get());
-        size_t globalQueueIndex = INFLIGHT_FRAMES;
+        // Debuggers like Nsight Graphics will access the first queue at the main thread.
+        size_t globalQueueIndex = 0;
         auto globalQueue = utils::QueueStruct{.queue = device->getQueue(queueFamilyIndex,
                                                                         globalQueueIndex), .queueFamilyIdx = queueFamilyIndex};
         auto swapchainImagenViews = std::vector<VulkanImageHandle>{};

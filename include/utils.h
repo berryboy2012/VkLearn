@@ -4,6 +4,7 @@
 
 #ifndef VKLEARN_UTILS_H
 #define VKLEARN_UTILS_H
+#include <source_location>
 #include <concepts>
 #include <iostream>
 #include <functional>
@@ -34,8 +35,9 @@ namespace utils {
                                                                   VkDebugUtilsMessengerCallbackDataEXT const * pCallbackData,
                                                                   void * /*pUserData*/ );
     std::vector<char> read_file(const std::string& filePath);
-    std::tuple<std::vector<const char*>, uint32_t> stringToVecptrU32(const std::vector<std::string> &strings);
-    inline void vk_ensure(const vk::Result &result, const std::optional<std::string> &prompt = std::nullopt);
+    std::tuple<std::vector<const char*>, uint32_t> stringToVecptrU32(const std::span<const std::string> &strings);
+    inline void vk_ensure(const vk::Result &result, const std::optional<std::string> &prompt = std::nullopt, const std::source_location& location = std::source_location::current());
+    void log_and_pause(const std::optional<std::string> &prompt = std::nullopt, size_t sleepMs = 1000, const std::source_location& location = std::source_location::current());
     template <typename T>
     concept isGlmType = requires (){
         typename T::value_type;

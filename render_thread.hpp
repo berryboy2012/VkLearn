@@ -17,8 +17,10 @@ void render_work_thread(
         VulkanResourceManager &&resMgrHdl,
         vk::Extent2D renderExtent, vk::Format renderSwapchainFmt, vk::Format renderDepthFmt,
         vk::Semaphore imageAvailableSemaphore, vk::Semaphore renderCompleteSemaphore) {
+    // Queue 0 is used by the main thread.
+    auto queueIndex = inflightIndex+1;
     auto renderQueue = utils::QueueStruct{.queue = renderDev.getQueue(queueFamilyIndex,
-                                                                      inflightIndex), .queueFamilyIdx = queueFamilyIndex};
+                                                                      queueIndex), .queueFamilyIdx = queueFamilyIndex};
     auto resMgr = VulkanResourceManager{std::forward<VulkanResourceManager>(resMgrHdl)};resMgr.setupManagerHandle(renderQueue);
     auto viewport = get_viewport_info(renderExtent.width, renderExtent.height);
     /*The order of preparing stuffs:

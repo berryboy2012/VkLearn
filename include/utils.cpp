@@ -5,6 +5,8 @@
 
 #ifndef VKLEARN_UTILS_HPP
 #define VKLEARN_UTILS_HPP
+#include <chrono>
+#include <thread>
 #include <concepts>
 #include <iostream>
 #include <functional>
@@ -154,7 +156,7 @@ namespace utils {
     }
 
     // Extract C-style vector<const char*> and size() from vector<string>
-    std::tuple<std::vector<const char*>, uint32_t> stringToVecptrU32(const std::vector<std::string> &strings){
+    std::tuple<std::vector<const char*>, uint32_t> stringToVecptrU32(const std::span<const std::string> &strings){
         std::vector<const char*> vecPtr;
         for (const auto& str: strings){
             vecPtr.push_back(str.c_str());
@@ -172,13 +174,26 @@ namespace utils {
         requires std::is_same_v<decltype(T::pNext), void*>;
     };
 
-    inline void vk_ensure(const vk::Result &result, const std::optional<std::string> &prompt){
-        if (result != vk::Result::eSuccess){
+    inline void vk_ensure(const vk::Result &result, const std::optional<std::string> &prompt, const std::source_location& location){
+        if (result != vk::Result::eSuccess) [[unlikely]]{
+            std::cerr<<location.file_name() << ':'
+                     << location.line() << ' ' << to_string(result);
             if (prompt.has_value()){
                 std::cerr<<prompt.value()<<std::endl;
+            } else {
+                std::cerr<<std::endl;
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             std::abort();
         }
+    }
+
+    void log_and_pause(const std::optional<std::string> &prompt, size_t sleepMs, const std::source_location& location){
+        std::cout << "Logging:"
+                  << location.file_name() << ':'
+                  << location.line() << ' '
+                  << (prompt.has_value() ? prompt.value() : "") << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
     }
 
     void probeLayout(spirv_cross::CompilerGLSL &glsl, spirv_cross::SPIRType &objType, size_t &offset, size_t &size){
