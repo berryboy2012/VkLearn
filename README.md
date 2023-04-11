@@ -35,6 +35,149 @@ The rest are trivial stuffs.
 - `bindings_management.hpp`: The mapping between execution's requirements and data on the machine in terms of resources.
 - __TODO__ `timeline_management.hpp`
 
+### [WIP] Directive-style Vulkan object creation
+
+```c++
+    /*Vulkan objects needed for rendering-related Vulkan objects creation*/
+    vk::Instance inst;
+    vk::PhysicalDevice physDev;
+    vk::Device renderDev;
+    auto renderQueue = utils::QueueStruct{.queue = vk::Queue{}, .queueFamilyIdx = 0};
+    vk::Format renderSwapchainFmt; vk::Format renderDepthFmt;
+    vk::Extent2D renderExtent;
+    /*Our thin-layered manager objects*/
+    auto resMgr = VulkanResourceManager{inst, physDev, renderDev, renderQueue};
+    auto descMgr = DescriptorManager{renderDev};
+    
+    /*Various factories used to manage the creation of corresponding Vulkan objects*/
+    auto vertexShaderFactory = VertexShaderFactory{renderDev};
+    auto fragmentShaderFactory = FragmentShaderFactory{renderDev};
+    auto subpassFactory = SubpassFactory{renderDev, vertexShaderFactory, fragmentShaderFactory};
+    auto resourceManager = RenderResourceManager{renderDev, resMgr};
+    auto renderpassFactory = RenderpassFactory{renderDev, subpassFactory, vertexShaderFactory, fragmentShaderFactory, resourceManager};
+
+    /*Fill shader info*/
+    auto vertShaderIdx = vertexShaderFactory.registerShader("vert");
+    vertexShaderFactory.loadShaderModule(vertShaderIdx, "shaders/shader.vert.spv", "main");
+    std::vector<std::string> vertAttrs = {"inPosition", "inColor", "inTexCoord"};
+    vertexShaderFactory.setVertexInputAttributeTable<model_info::PCTVertex>(vertShaderIdx, vk::VertexInputRate::eVertex, 0,
+                                                                            vertAttrs, "foo_ModelGeometry");
+    resourceManager.createBuffer("foo_ModelGeometry",
+                                 model_info::gVertices.size()*sizeof(model_info::PCTVertex),vk::BufferUsageFlagBits::eVertexBuffer, {});
+    resourceManager.copyDataToResource<model_info::PCTVertex>("foo_ModelGeometry", model_info::gVertices);
+    vertexShaderFactory.setInputAssemblyState(vertShaderIdx, vk::PrimitiveTopology::eTriangleList);
+    vertexShaderFactory.setRasterizationInfo(vertShaderIdx);
+
+    auto fragShaderIdx = fragmentShaderFactory.registerShader("frag");
+    fragmentShaderFactory.loadShaderModule(fragShaderIdx, "shaders/shader.frag.spv", "main");
+    fragmentShaderFactory.setAttachmentProperties(fragShaderIdx, "outColor", vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eColorAttachmentOptimal);
+    fragmentShaderFactory.setColorAttachmentBlendInfo(fragShaderIdx, "outColor");
+    fragmentShaderFactory.setDepthStencilInfo(fragShaderIdx);
+    fragmentShaderFactory.setMSAAInfo(fragShaderIdx);
+    fragmentShaderFactory.setColorBlendInfo(fragShaderIdx);
+
+    /*Fill subpass info*/
+    std::string subpassName  = "first_subpass";
+    subpassFactory.registerSubpass(subpassName);
+    subpassFactory.loadVertexShader(subpassName, vertShaderIdx);
+    subpassFactory.loadFragmentShader(subpassName, fragShaderIdx);
+    subpassFactory.gatherSubpassInfo(subpassName);
+    subpassFactory.linkDescriptorWithResourceName(subpassName, "modelUBO", "modelMatrix");
+    resourceManager.createBuffer("modelMatrix", sizeof(ModelUBO), vk::BufferUsageFlagBits::eUniformBuffer,
+                                 vma::AllocationCreateFlagBits::eMapped|vma::AllocationCreateFlagBits::eHostAccessSequentialWrite);
+    subpassFactory.linkPushConstantWithResourceName(subpassName, "sceneVP", "sceneVPPush");
+    resourceManager.createPushConst<ScenePushConstants>("sceneVPPush");
+    auto testPConst = ScenePushConstants{.view = glm::identity<glm::mat4>(), .proj = glm::identity<glm::mat4>()};
+    auto testPConstView = std::span<const ScenePushConstants>{&testPConst, 1};
+    resourceManager.copyDataToResource("sceneVPPush", testPConstView);
+    assert(resourceManager.getPushConstData<ScenePushConstants>("sceneVPPush")==testPConst);
+
+    subpassFactory.linkDescriptorWithResourceName(subpassName, "texSampler", "testTexture");
+    {
+        auto testTexture = TextureObject{"textures/test_512.png", resMgr};
+        const auto& testTexInfo = testTexture.getImageInfo();
+        resourceManager.createImage("testTexture", testTexInfo.extent, testTexInfo.format, testTexInfo.tiling, testTexInfo.usage, {});
+        resourceManager.copyDataToResource("testTexture", testTexture.getImageHostData());
+        resourceManager.createViewForImage("testTexture", vk::ImageAspectFlagBits::eColor);
+        vk::SamplerCreateInfo samplerInfo{};
+        samplerInfo.magFilter = vk::Filter::eLinear;
+        samplerInfo.minFilter = vk::Filter::eLinear;
+        samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+        samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+        samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+        samplerInfo.anisotropyEnable = VK_TRUE;
+        samplerInfo.maxAnisotropy = 16.0f;
+        samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+        samplerInfo.unnormalizedCoordinates = VK_FALSE;
+        samplerInfo.compareEnable = VK_FALSE;
+        samplerInfo.compareOp = vk::CompareOp::eAlways;
+        samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+        resourceManager.createSamplerForImage("testTexture", samplerInfo);
+    }
+    for (const auto& descSetBind: subpassFactory.getPipelineDescriptorBindings(subpassName)){
+        descMgr.registerDescriptorBindings(descSetBind.second);
+    }
+
+    /*Fill renderpass info*/
+    std::string renderpassName = "mainRenderpass";
+    auto renderpassIdx = renderpassFactory.registerRenderpass(renderpassName, renderExtent);
+    auto subpassIdx = renderpassFactory.loadSubpass(renderpassIdx, subpassName);
+    renderpassFactory.gatherAttachmentReferences(renderpassIdx);
+
+    vk::AttachmentDescription2 swapchainAttachDesc{};
+    swapchainAttachDesc.format = renderSwapchainFmt;
+    swapchainAttachDesc.samples = vk::SampleCountFlagBits::e1;
+    swapchainAttachDesc.loadOp = vk::AttachmentLoadOp::eClear;
+    swapchainAttachDesc.storeOp = vk::AttachmentStoreOp::eStore;
+    swapchainAttachDesc.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+    swapchainAttachDesc.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+    swapchainAttachDesc.initialLayout = vk::ImageLayout::eUndefined;
+    swapchainAttachDesc.finalLayout = vk::ImageLayout::ePresentSrcKHR;
+    auto swapchainAttachIdx = renderpassFactory.createAttachment(renderpassIdx, swapchainAttachDesc);
+
+    vk::AttachmentDescription2 depthAttachDesc{};
+    depthAttachDesc.format = renderDepthFmt;
+    depthAttachDesc.samples = vk::SampleCountFlagBits::e1;
+    depthAttachDesc.loadOp = vk::AttachmentLoadOp::eClear;
+    depthAttachDesc.storeOp = vk::AttachmentStoreOp::eDontCare;
+    depthAttachDesc.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+    depthAttachDesc.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+    depthAttachDesc.initialLayout = vk::ImageLayout::eUndefined;
+    depthAttachDesc.finalLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+    auto depthAttachIdx = renderpassFactory.createAttachment(renderpassIdx, depthAttachDesc);
+
+    renderpassFactory.linkAttachmentRefWithAttach(renderpassIdx, subpassIdx, "outColor", swapchainAttachIdx);
+    // the Depth attachment will always have the variable name "__depthShaderVariable"
+    renderpassFactory.linkAttachmentRefWithAttach(renderpassIdx, subpassIdx, "__depthShaderVariable", depthAttachIdx);
+    {
+        vk::ImageCreateInfo swapchainImgInfo{};
+        swapchainImgInfo.flags = {};
+        swapchainImgInfo.imageType = vk::ImageType::e2D;
+        swapchainImgInfo.format = renderSwapchainFmt;
+        swapchainImgInfo.extent = vk::Extent3D{renderExtent, 1};
+        swapchainImgInfo.mipLevels = 1;
+        swapchainImgInfo.arrayLayers = 1;
+        swapchainImgInfo.samples = vk::SampleCountFlagBits::e1;
+        swapchainImgInfo.tiling = vk::ImageTiling::eOptimal;
+        swapchainImgInfo.usage = vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eColorAttachment;
+        swapchainImgInfo.sharingMode = vk::SharingMode::eExclusive;
+        auto swapchainViewInfo = factory::image_view_info_builder(
+                nullptr,
+                swapchainImgInfo.imageType, swapchainImgInfo.format,
+                swapchainImgInfo.mipLevels, swapchainImgInfo.arrayLayers,
+                vk::ImageAspectFlagBits::eColor);
+        resourceManager.createPhantomView("__swapchainView", swapchainImgInfo, vk::ImageLayout::ePresentSrcKHR, swapchainViewInfo);
+    }
+    {
+        resourceManager.createImage("depthImage", vk::Extent3D{renderExtent, 1}, renderDepthFmt, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eDepthStencilAttachment, {});
+        resourceManager.createViewForImage("depthImage", vk::ImageAspectFlagBits::eDepth);
+    }
+
+    renderpassFactory.linkAttachmentWithResource(renderpassIdx, swapchainAttachIdx, "__swapchainView");
+    renderpassFactory.linkAttachmentWithResource(renderpassIdx, depthAttachIdx, "depthImage");
+    /*Create renderpass, framebuffer, pipelines etc.*/
+    renderpassFactory.buildVulkanObjects(renderpassIdx);
+```
 
 ## Current state:
 - Uses some features in Vulkan1.3 to make life a bit easier.

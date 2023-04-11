@@ -40,6 +40,7 @@ public:
             if (ok == 1 && channels == 4) {
                 pixels_ = stbi_load(filePath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
             } else {
+                utils::log_and_pause("Texture file must be R8G8B8A8 for now");
                 std::abort();
             }
             extent_.width = width;
@@ -324,7 +325,7 @@ private:
                 return true;
             } break;
             default:
-                assert(("Only buffer image and push-constant allowed", false));
+                utils::log_and_pause("Only buffer image and push-constant allowed");
                 std::abort();
         }
     }

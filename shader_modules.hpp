@@ -1115,6 +1115,7 @@ public:
             shaderLUT_.erase(result.name_);
             return result;
         }
+        utils::log_and_pause("Shader not found in the manager");
         std::abort();
     }
 

@@ -275,6 +275,7 @@ namespace utils {
         {
             std::ifstream file(filePathString, std::ios::ate | std::ios::binary);
             if (!file.is_open()) {
+                utils::log_and_pause(std::format("Cannot open shader file at: {}", filePath));
                 std::abort();
             }
             auto fileSize = (size_t) file.tellg();

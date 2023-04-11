@@ -170,7 +170,7 @@ void render_work_thread(
                     }
                     break;
                 default:
-                    std::abort();
+                    utils::vk_ensure(resultResetPool);
             }
         } while (!exitSignal & !resumeRender);
         cmdMgr.resetPool();

@@ -105,6 +105,7 @@ std::vector<std::string> get_required_validation_layers(bool enableValidationLay
                 }
             }
             if (!layerFound) {
+                utils::log_and_pause("Validation layer not found");
                 std::abort();
             }
         }
@@ -313,6 +314,7 @@ vk::PhysicalDevice get_physical_device(const vk::Instance &vkInstance) {
 vk::UniqueSurfaceKHR create_surface_sdl(SDL_Window *p_SDLWindow, const vk::Instance &vkInstance) {
     VkSurfaceKHR tmpSurface{};
     if (SDL_Vulkan_CreateSurface(p_SDLWindow, vkInstance, &tmpSurface) != SDL_TRUE) {
+        utils::log_and_pause("Surface creation failed");
         std::abort();
     }
     auto surface = vk::UniqueSurfaceKHR(tmpSurface, vkInstance);
@@ -341,10 +343,12 @@ vk::Format find_qualified_depth_format(const PhysicalDeviceInfo &physicalDeviceP
                         return fmt;
                     }
                 default:
-                    std::abort();//Not implemented
+                    utils::log_and_pause("VkImageTiling can only be Optimal or Linear");
+                    std::abort();
             }
         }
     }
+    utils::log_and_pause("No valid depth format supported by device");
     std::abort();
 }
 
@@ -556,6 +560,7 @@ int main(int argc, char *argv[]) {
     {
         auto queueFamIdx = find_qualified_queue_family(physicalDeviceProps, numQueues);
         if (!queueFamIdx.has_value()) {
+            utils::log_and_pause("Valid queue family not found");
             std::abort();
         }
         queueFamilyIndex = queueFamIdx.value();

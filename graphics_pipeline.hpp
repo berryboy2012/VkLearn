@@ -216,6 +216,7 @@ public:
                 return binding;
             }
         }
+        utils::log_and_pause("Descriptor binding not found");
         std::abort();
     }
 
