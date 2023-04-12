@@ -4,14 +4,16 @@ A personal project for learning Vulkan1.3, VMA, assimp, meshoptimizer, SDL, Dear
 
 ## Building
 
-Use `vcpkg` to install the following libs:
+Either install the following libs through `vcpkg` manually:
 ```
 SDL2[vulkan]
 vulkan-headers
+vulkan-memory-allocator
 glm
 openvr
 stb
 ```
+Or rely on the provided `vcpkg.json`.
 
 Add the following to the CMake options:
 ```shell

@@ -1,0 +1,29 @@
+{
+  "name": "vk-learn",
+  "version-string": "0.0.0",
+  "builtin-baseline": "203383666e2422ed31e1faebe6efa6e306bd126d",
+  "dependencies": [
+    {
+      "name": "sdl2",
+      "features": ["vulkan"]
+    },
+    {
+      "name": "vulkan-headers"
+    },
+    {
+      "name": "vulkan-memory-allocator"
+    },
+    {
+      "name": "glm"
+    },
+    {
+      "name": "openvr"
+    },
+    {
+      "name": "stb"
+    }
+  ],
+  "overrides": [
+    { "name": "vulkan-headers", "version": "1.3.243#2" }
+  ]
+}
