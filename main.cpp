@@ -306,8 +306,8 @@ vk::PhysicalDevice get_physical_device(const vk::Instance &vkInstance) {
     for (const auto &device: devices) {
         auto devProperty = device.getProperties2();
         std::cout << std::string_view{devProperty.properties.deviceName} << std::endl;
-        chosenPhysicalDevice = device;
     }
+    chosenPhysicalDevice = devices[0];
     return chosenPhysicalDevice;
 }
 
@@ -403,7 +403,7 @@ create_vulkan_device(const vk::PhysicalDevice &chosenPhysicalDevice, const Physi
     for (const auto& devExt: deviceExtensions){
         auto found=false;
         for (const auto& availDevExt: physDevInfo.devExts){
-            if (availDevExt.extensionName == devExt){
+            if (std::string_view{availDevExt.extensionName} == devExt){
                 found = true;
                 break;
             }
@@ -608,7 +608,7 @@ int main(int argc, char *argv[]) {
                 //imgHandle.resInfo.flags = {};
                 imgHandle.resInfo.format = swapchainFormat.surfaceFormat.format;
                 imgHandle.resInfo.usage =
-                        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
+                        vk::ImageUsageFlagBits::eColorAttachment;
                 imgHandle.resInfo.extent = {{.width = surfaceExtent.width, .height = surfaceExtent.height, .depth = 1}};
                 imgHandle.resInfo.tiling = vk::ImageTiling::eOptimal;
                 imgHandle.resInfo.samples = vk::SampleCountFlagBits::e1;
