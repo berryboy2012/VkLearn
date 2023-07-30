@@ -302,13 +302,24 @@ vk::UniqueDebugUtilsMessengerEXT create_vulkan_debug_msg(const vk::Instance &vkI
 vk::PhysicalDevice get_physical_device(const vk::Instance &vkInstance) {
     auto [resultDevices, devices] = vkInstance.enumeratePhysicalDevices();
     utils::vk_ensure(resultDevices);
-    auto chosenPhysicalDevice = vk::PhysicalDevice{};
+    std::any chosenPhysicalDevice{};
     for (const auto &device: devices) {
         auto devProperty = device.getProperties2();
         std::cout << std::string_view{devProperty.properties.deviceName} << std::endl;
+        if (!chosenPhysicalDevice.has_value()) {
+            chosenPhysicalDevice = device;
+        } else {
+            auto chosenDevProps = any_cast<vk::PhysicalDevice>(chosenPhysicalDevice).getProperties2();
+            switch (chosenDevProps.properties.deviceType) {
+                case vk::PhysicalDeviceType::eDiscreteGpu: break;
+                default:
+                    if (devProperty.properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                        chosenPhysicalDevice = device;
+                    }
+            }
+        }
     }
-    chosenPhysicalDevice = devices[0];
-    return chosenPhysicalDevice;
+    return any_cast<vk::PhysicalDevice>(chosenPhysicalDevice);
 }
 
 vk::UniqueSurfaceKHR create_surface_sdl(SDL_Window *p_SDLWindow, const vk::Instance &vkInstance) {
