@@ -173,6 +173,9 @@ void render_work_thread(
                     utils::vk_ensure(resultResetPool);
             }
         } while (!exitSignal & !resumeRender);
+        if (exitSignal) {
+            break;
+        }
         cmdMgr.resetPool();
         utils::vk_ensure(renderDev.resetFences(commandPoolResetFence.get()));
 
@@ -313,7 +316,8 @@ void render_work_thread(
         mainRendererComms[inflightIndex].imageViewHandleConsumed.release();
         // After submit
     }
-    // Workaround for the lack of VK_EXT_swapchain_maintenance1 support
+    // Workaround for the lack of VK_EXT_swapchain_maintenance1 support,
+    //   might cause validation layer emit `337425955: UNASSIGNED-Threading-MultipleThreads`
     utils::vk_ensure(renderDev.waitIdle());
 }
 

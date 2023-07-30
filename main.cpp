@@ -423,12 +423,17 @@ create_vulkan_device(const vk::PhysicalDevice &chosenPhysicalDevice, const Physi
     return std::move(logicDevice);
 }
 
-vk::Extent2D get_surface_size(SDL_Window *p_SDLWindow) {
+vk::Extent2D get_surface_size(SDL_Window *p_SDLWindow, vk::PhysicalDevice physicalDevice, vk::SurfaceKHR surface) {
     auto surfaceExtent = vk::Extent2D{};
     int width, height;
     SDL_Vulkan_GetDrawableSize(p_SDLWindow, &width, &height);
     surfaceExtent.width = width;
     surfaceExtent.height = height;
+    // Sometimes SDL's surface size report is unreliable.
+    auto surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface).value;
+    if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+        surfaceExtent = surfaceCapabilities.currentExtent;
+    }
     return surfaceExtent;
 }
 
@@ -586,7 +591,7 @@ int main(int argc, char *argv[]) {
         swapchainImageCount = std::clamp(swapchainImageCount,
                                          physicalDeviceProps.surfaceCaps.surfaceCapabilities.minImageCount,
                                          physicalDeviceProps.surfaceCaps.surfaceCapabilities.maxImageCount);
-        auto surfaceExtent = get_surface_size(p_SDLWindow);
+        auto surfaceExtent = get_surface_size(p_SDLWindow, chosenPhysicalDevice, surfaceSDL.get());
         swapchain = create_swapchain(device.get(), chosenPhysicalDevice,
                                      surfaceExtent, swapchainFormat, swapchainPresentMode, swapchainImageCount,
                                      surfaceSDL.get(), swapchain.get());
@@ -768,13 +773,16 @@ int main(int argc, char *argv[]) {
                 // Wait until surface size is valid for rendering
                 bool isSurfaceZeroSize;
                 do {
-                    surfaceExtent = get_surface_size(p_SDLWindow);
+                    surfaceExtent = get_surface_size(p_SDLWindow, chosenPhysicalDevice, surfaceSDL.get());
                     if (surfaceExtent.width * surfaceExtent.height == 0) {
                         isSurfaceZeroSize = true;
                     } else {
                         isSurfaceZeroSize = false;
                     }
                     exitSignal = want_exit_sdl();
+                    // Wait for at most 200ms, we don't care what the event is though.
+                    SDL_Event sdlEvent{};
+                    SDL_WaitEventTimeout(&sdlEvent, 200);
                 } while (!exitSignal & isSurfaceZeroSize);
                 utils::vk_ensure(device->waitIdle());
                 // We only need to explicitly destroy swapchain's ImageViews
