@@ -37,6 +37,7 @@ struct MainRendererComm{
     std::atomic<bool> swapchainInvalid{false};
 };
 std::array<MainRendererComm, INFLIGHT_FRAMES> mainRendererComms{};
+std::binary_semaphore deviceAvailable{0};
 void initialize_main_sync_objs(){
     for (auto& syncObj: mainRendererComms){
         syncObj.imageViewHandle.store({});
@@ -44,10 +45,17 @@ void initialize_main_sync_objs(){
         syncObj.imageViewHandleConsumed.try_acquire();
         syncObj.swapchainInvalid.store(false);
     }
+    deviceAvailable.try_acquire();
+    deviceAvailable.release();
 }
 void notify_renderer_exit(){
     for (auto& syncObj: mainRendererComms){
         syncObj.swapchainInvalid.store(true);
     }
+}
+void wait_vulkan_device_idle(vk::Device device){
+    deviceAvailable.acquire();
+    utils::vk_ensure(device.waitIdle());
+    deviceAvailable.release();
 }
 #endif //VKLEARN_GLOBAL_OBJECTS_HPP

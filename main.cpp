@@ -795,7 +795,7 @@ int main(int argc, char *argv[]) {
                     SDL_Event sdlEvent{};
                     SDL_WaitEventTimeout(&sdlEvent, 200);
                 } while (!exitSignal & isSurfaceZeroSize);
-                utils::vk_ensure(device->waitIdle());
+                wait_vulkan_device_idle(device.get());
                 // We only need to explicitly destroy swapchain's ImageViews
                 swapchainImagenViews.clear();
             } else {
@@ -803,10 +803,10 @@ int main(int argc, char *argv[]) {
             }
         }
         // Workaround for the lack of VK_EXT_swapchain_maintenance1 support
-        utils::vk_ensure(device->waitIdle());
+        wait_vulkan_device_idle(device.get());
     }
     // End of rendering, clean up
-    utils::vk_ensure(device->waitIdle());
+    wait_vulkan_device_idle(device.get());
     clean_sdl(p_SDLWindow);
     return 0;
 }

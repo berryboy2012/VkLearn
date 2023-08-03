@@ -317,8 +317,8 @@ void render_work_thread(
         // After submit
     }
     // Workaround for the lack of VK_EXT_swapchain_maintenance1 support,
-    //   might cause validation layer emit `337425955: UNASSIGNED-Threading-MultipleThreads`
-    utils::vk_ensure(renderDev.waitIdle());
+    //   use semaphore to avoid validation layer emitting `337425955: UNASSIGNED-Threading-MultipleThreads`
+    wait_vulkan_device_idle(renderDev);
 }
 
 #endif //VKLEARN_RENDER_THREAD_HPP
