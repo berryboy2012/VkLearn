@@ -129,6 +129,9 @@ std::vector<std::string> get_required_instance_extensions(SDL_Window *window, bo
     if (enableValidationLayers) {
         instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
+    // We want robust interaction with window subsystem (in the future, as device support is non-existent ATM)
+    // NVIDIA users should be getting support with R545.37
+    //instanceExtensions.push_back(VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
     instanceExtensions.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
     return instanceExtensions;
 }
@@ -174,7 +177,6 @@ std::vector<std::string> get_required_device_extensions() {
     std::vector<std::string> requiredDeviceExtensions{
             VK_KHR_SWAPCHAIN_EXTENSION_NAME,
             // We want robust interaction with window subsystem (in the future, as device support is non-existent ATM)
-            //VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,
             //VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
             VK_KHR_PRESENT_ID_EXTENSION_NAME,
             VK_KHR_PRESENT_WAIT_EXTENSION_NAME,
@@ -450,7 +452,7 @@ vk::Extent2D get_surface_size(SDL_Window *p_SDLWindow, vk::PhysicalDevice physic
 
 vk::SurfaceFormat2KHR find_qualified_surface_format_2(const std::span<const vk::SurfaceFormat2KHR> surfaceFormats2) {
     vk::SurfaceFormat2KHR surfaceFormat2{};
-    auto preferredFmt = vk::Format::eB8G8R8A8Unorm;
+    auto preferredFmt = vk::Format::eB8G8R8A8Srgb;
     auto preferredColor = vk::ColorSpaceKHR::eSrgbNonlinear;
     surfaceFormat2 = surfaceFormats2[0];
     if (surfaceFormats2.size() == 1 && surfaceFormats2[0].surfaceFormat.format == vk::Format::eUndefined) {
