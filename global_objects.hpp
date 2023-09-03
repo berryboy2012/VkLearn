@@ -31,18 +31,20 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #endif
 constexpr size_t INFLIGHT_FRAMES = 2;
 struct MainRendererComm{
+    std::atomic<bool> mainLoopReady{false};
     std::atomic<vk::ImageView> imageViewHandle{};
-    std::binary_semaphore imageViewHandleAvailable{0};
-    std::binary_semaphore imageViewHandleConsumed{0};
+    std::binary_semaphore imageViewReadyToRender{0};
+    std::binary_semaphore imageViewRendered{0};
     std::atomic<bool> swapchainInvalid{false};
 };
 std::array<MainRendererComm, INFLIGHT_FRAMES> mainRendererComms{};
 std::binary_semaphore deviceAvailable{0};
 void initialize_main_sync_objs(){
     for (auto& syncObj: mainRendererComms){
+        syncObj.mainLoopReady.store(false);
         syncObj.imageViewHandle.store({});
-        syncObj.imageViewHandleAvailable.try_acquire();
-        syncObj.imageViewHandleConsumed.try_acquire();
+        syncObj.imageViewReadyToRender.try_acquire();
+        syncObj.imageViewRendered.try_acquire();
         syncObj.swapchainInvalid.store(false);
     }
     deviceAvailable.try_acquire();
@@ -53,6 +55,7 @@ void notify_renderer_exit(){
         syncObj.swapchainInvalid.store(true);
     }
 }
+// TODO: Deprecate it
 void wait_vulkan_device_idle(vk::Device device){
     deviceAvailable.acquire();
     utils::vk_ensure(device.waitIdle());

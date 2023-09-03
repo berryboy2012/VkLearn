@@ -174,7 +174,7 @@ namespace utils {
         requires std::is_same_v<decltype(T::pNext), void*>;
     };
 
-    inline void vk_ensure(const vk::Result &result, const std::optional<std::string> &prompt, const std::source_location& location){
+    inline void vk_ensure(const vk::Result &result, const std::optional<std::string_view> &prompt, const std::source_location& location){
         if (result != vk::Result::eSuccess) [[unlikely]]{
             std::cerr<<location.file_name() << ':'
                      << location.line() << ' ' << to_string(result);
@@ -188,7 +188,7 @@ namespace utils {
         }
     }
 
-    void log_and_pause(const std::optional<std::string> &prompt, size_t sleepMs, const std::source_location& location){
+    void log_and_pause(const std::optional<std::string_view> &prompt, size_t sleepMs, const std::source_location& location){
         std::cout << "Logging:"
                   << location.file_name() << ':'
                   << location.line() << ' '

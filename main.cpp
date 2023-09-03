@@ -8,6 +8,8 @@
 #include <type_traits>
 #include <string>
 #include <string_view>
+#define WIN32_LEAN_AND_MEAN
+#include "tracy/Tracy.hpp"
 #include <SDL2/SDL.h>
 
 #ifndef VULKAN_HPP_NO_EXCEPTIONS
@@ -523,7 +525,11 @@ vk::UniqueSwapchainKHR create_swapchain(vk::Device device, vk::PhysicalDevice ph
     createInfo.presentMode = presentMode;
     createInfo.clipped = true;
     createInfo.oldSwapchain = oldSwapchain;
+    auto copyOfCreateInfo = createInfo;
     auto [result, swapchain] = device.createSwapchainKHRUnique(createInfo);
+    if (copyOfCreateInfo != createInfo) {
+        utils::log_and_pause("WARN: VkSwapchainCreateInfoKHR{} was changed upon submission.", 0);
+    }
     utils::vk_ensure(result, "swapchain creation failed");
     return std::move(swapchain);
 }
@@ -599,11 +605,12 @@ int main(int argc, char *argv[]) {
         std::cout<<"MAIN: Init...\n"<<std::endl;
         // -------- Repetitive --------
         uint32_t swapchainImageCount =
-                INFLIGHT_FRAMES + 1;// It has nothing to do with in-flight frames! Driver may not adhere to it.
+                INFLIGHT_FRAMES*2+1;// It has nothing to do with in-flight frames! Driver may not adhere to it.
         // Cannot be smaller than INFLIGHT_FRAMES
         swapchainImageCount = std::clamp(swapchainImageCount,
                                          physicalDeviceProps.surfaceCaps.surfaceCapabilities.minImageCount,
                                          physicalDeviceProps.surfaceCaps.surfaceCapabilities.maxImageCount);
+        utils::log_and_pause(std::format("Trying to acquire {} images from swapchain...", swapchainImageCount), 0);
         auto surfaceExtent = get_surface_size(p_SDLWindow, chosenPhysicalDevice, surfaceSDL.get());
         swapchain = create_swapchain(device.get(), chosenPhysicalDevice,
                                      surfaceExtent, swapchainFormat, swapchainPresentMode, swapchainImageCount,
@@ -637,6 +644,7 @@ int main(int argc, char *argv[]) {
             }
         }
         swapchainImageCount = swapchainImagenViews.size();
+        utils::log_and_pause(std::format("Acquired {} images from swapchain...", swapchainImageCount), 0);
         auto globalResMgr = VulkanResourceManager{instance.get(), chosenPhysicalDevice, device.get(), globalQueue};
 
         auto imageAvailableSemaphores = std::vector<vk::UniqueSemaphore>{};
@@ -679,8 +687,6 @@ int main(int argc, char *argv[]) {
         // Begin rendering loop
         std::cout<<"MAIN: Looping...\n"<<std::endl;
         while (!resetSwapchain & !exitSignal) {
-            exitSignal |= want_exit_sdl();
-
             /* During rendering loop, the main thread should orchestrate the following things:
              * Check whether surface size is changed
              * For each loop, only one swapchain image is issued to one thread, and only one image is brought to presentation
@@ -713,39 +719,17 @@ int main(int argc, char *argv[]) {
              *   //(Impossible to set fence here for now, as device support for VK_EXT_swapchain_maintenance1 is non-existent)
              * Iterate to the next frame
              * */
-
-            vk::Result result{};
-            uint32_t imageIndex; // This is NOT the same as `frames` !
-            std::tie(result, imageIndex) = device->acquireNextImageKHR(
-                    swapchain.get(), std::numeric_limits<uint64_t>::max(),
-                    imageAvailableSemaphores[currentRenderer].get(), nullptr);
-            if (result == vk::Result::eErrorOutOfDateKHR) {
-                resetSwapchain = true;
-                continue;
-            } else if (result != vk::Result::eSuboptimalKHR) {
-                utils::vk_ensure(result);
-            }
-
-            mainRendererComms[currentRenderer].imageViewHandle.store(swapchainImagenViews[imageIndex].view.get());
-            mainRendererComms[currentRenderer].imageViewHandleAvailable.release();
-            rendererSwapchainImageIndices[currentRenderer] = imageIndex;
-            int nextRenderer = (currentRenderer + 1) % int(INFLIGHT_FRAMES);
-            bool isFirstLoop = false;
-            while (!mainRendererComms[nextRenderer].imageViewHandleConsumed.try_acquire_for(
-                    std::chrono::milliseconds(100))) {
-                if (mainRendererComms[nextRenderer].imageViewHandle.load() == vk::ImageView{}) {
-                    isFirstLoop = true;
-                    break;
-                } else {
-                    std::cout << std::format("Renderer {} is lagging!\n", nextRenderer) << std::endl;
+            exitSignal |= want_exit_sdl();
+            if (mainRendererComms[currentRenderer].mainLoopReady.load()) {
+                if (!mainRendererComms[currentRenderer].imageViewRendered.try_acquire_for(
+                        std::chrono::milliseconds(100))) {
+                    std::cout << std::format("Renderer {} is lagging!\n", currentRenderer) << std::endl;
                     exitSignal = want_exit_sdl();
                 }
-            }
-            if (!isFirstLoop) {
                 vk::PresentInfoKHR presentInfo{};
-                presentInfo.setWaitSemaphores(renderCompleteSemaphores[nextRenderer].get());
+                presentInfo.setWaitSemaphores(renderCompleteSemaphores[currentRenderer].get());
                 presentInfo.setSwapchains(swapchain.get());
-                presentInfo.setImageIndices(rendererSwapchainImageIndices[nextRenderer]);
+                presentInfo.setImageIndices(rendererSwapchainImageIndices[currentRenderer]);
                 vk::PresentIdKHR presentId{};
                 uint64_t presId = frameId;
                 frameId += 1;
@@ -760,28 +744,50 @@ int main(int argc, char *argv[]) {
                 } else {
                     utils::vk_ensure(resultPresent);
                 }
+            } else {
+                mainRendererComms[currentRenderer].mainLoopReady.store(true);
+                utils::log_and_pause(std::format("Main thread is ready for Renderer {}", currentRenderer), 0);
             }
+
+            vk::Result result{};
+            uint32_t imageIndex; // This is NOT the same as `frames` !
+            std::tie(result, imageIndex) = device->acquireNextImageKHR(
+                    swapchain.get(), std::numeric_limits<uint64_t>::max(),
+                    imageAvailableSemaphores[currentRenderer].get(), nullptr);
+            if (result == vk::Result::eErrorOutOfDateKHR) {
+                resetSwapchain = true;
+                continue;
+            } else if (result != vk::Result::eSuboptimalKHR) {
+                utils::vk_ensure(result);
+            }
+
+            mainRendererComms[currentRenderer].imageViewHandle.store(swapchainImagenViews[imageIndex].view.get());
+            mainRendererComms[currentRenderer].imageViewReadyToRender.release();
+
+            rendererSwapchainImageIndices[currentRenderer] = imageIndex;
+
             currentRenderer = (currentRenderer + 1) % INFLIGHT_FRAMES;
-            /* To handle swapchain resize events, we need even more sync:
-             * When the main thread is notified through vkAcquireNextImageKHR or vkQueuePresentKHR,
-             *  The main thread sets "isSwapchainInvalid" atomic for all rendering threads.
-             * Then the main thread waits all rendering threads to terminate.
-             *   The rendering thread needs to check "isSwapchainInvalid" atomic before waiting anything signaled by main thread.
-             *   This includes "isImageViewHandleAcquired" semaphore and "isImagePresented fence".
-             *   The rendering thread now needs to check "isSwapchainInvalid" atomic when waiting every fence and semaphore:
-             *    Since we don't need to rush when resetting swapchain, the waiting time can be set to a fairly large value.
-             *    We now need a loop and use std::binary_semaphore::try_acquire_for() when waiting for "isImageViewHandleAcquired" semaphore.
-             *    When waiting "isImagePresented fence", we have an infinite loop. Inside the loop, we set a time limit when
-             *     calling vkWaitForPresentKHR, for each iteration we check the atomic.
-             * After all rendering threads are terminated, the main thread can start its reset procedure.
-             * */
+
         }// Out of rendering loop, prepare to reset resources
+        /* To handle swapchain resize events, we need even more sync:
+            * When the main thread is notified through vkAcquireNextImageKHR or vkQueuePresentKHR,
+            *  The main thread sets "isSwapchainInvalid" atomic for all rendering threads.
+            * Then the main thread waits all rendering threads to terminate.
+            *   The rendering thread needs to check "isSwapchainInvalid" atomic before waiting anything signaled by main thread.
+            *   This includes "isImageViewHandleAcquired" semaphore and "isImagePresented fence".
+            *   The rendering thread now needs to check "isSwapchainInvalid" atomic when waiting every fence and semaphore:
+            *    Since we don't need to rush when resetting swapchain, the waiting time can be set to a fairly large value.
+            *    We now need a loop and use std::binary_semaphore::try_acquire_for() when waiting for "isImageViewHandleAcquired" semaphore.
+            *    When waiting "isImagePresented fence", we have an infinite loop. Inside the loop, we set a time limit when
+            *     calling vkWaitForPresentKHR, for each iteration we check the atomic.
+            * After all rendering threads are terminated, the main thread can start its reset procedure.
+            * */
         notify_renderer_exit();
         for (auto &renderer: renderThreads) {
             renderer.join();
         }
-        // Are we going to terminate the program?
         if (!exitSignal) {
+            // We are not going to terminate the program, so rebuild swapchain etc.
             if (resetSwapchain) {
                 // Wait until surface size is valid for rendering
                 bool isSurfaceZeroSize;

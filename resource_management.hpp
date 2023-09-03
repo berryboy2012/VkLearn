@@ -37,10 +37,10 @@ public:
             int width, height, channels;
             int ok;
             ok = stbi_info(filePath.c_str(), &width, &height, &channels);
-            if (ok == 1 && channels == 4) {
+            if (ok == 1 && channels >= 3) {
                 pixels_ = stbi_load(filePath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
             } else {
-                utils::log_and_pause("Texture file must be R8G8B8A8 for now");
+                utils::log_and_pause(std::format("Texture file must be no lesser than R8G8B8 for now, {}", stbi_failure_reason()));
                 std::abort();
             }
             extent_.width = width;

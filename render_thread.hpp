@@ -152,6 +152,9 @@ void render_work_thread(
     auto [resultFence, commandPoolResetFence] = renderDev.createFenceUnique(cmdPoolRstFenceInfo);
     utils::vk_ensure(resultFence);
     while (!exitSignal) {
+        while (!mainRendererComms[inflightIndex].mainLoopReady.load()){
+            utils::log_and_pause(std::format("Renderer {}: waiting for the main thread...", inflightIndex), 10);
+        }
         // Begin of pacing-insensitive tasks
         auto &commandBuffer = cmdBufs[0];
         vk::CommandBufferBeginInfo beginInfo = {};
@@ -178,7 +181,6 @@ void render_work_thread(
         }
         cmdMgr.resetPool();
         utils::vk_ensure(renderDev.resetFences(commandPoolResetFence.get()));
-
         auto beginResult = commandBuffer.begin(beginInfo);
         utils::vk_ensure(beginResult);
 
@@ -257,20 +259,20 @@ void render_work_thread(
                                                              renderExtent.width / (float) renderExtent.height, 0.1f,
                                                              10.0f);
         }
-
         // Now we must wait main thread for imageview handle
-        while (!mainRendererComms[inflightIndex].imageViewHandleAvailable.try_acquire_for(
-                std::chrono::milliseconds(10))) {
+        while (!mainRendererComms[inflightIndex].imageViewReadyToRender.try_acquire_for(
+                std::chrono::milliseconds(100))) {
             if (mainRendererComms[inflightIndex].swapchainInvalid.load()) {
                 exitSignal = true;
                 break;
+            } else {
+                utils::log_and_pause("Main thread is lagging!", 0);
             }
         }
         if (exitSignal) {
             break;
         }
         auto swapchainImageViewHandle = mainRendererComms[inflightIndex].imageViewHandle.load();
-
         attaches[0] = swapchainImageViewHandle;
 
         commandBuffer.beginRenderPass(renderPassInfoCombined.get<vk::RenderPassBeginInfo>(), vk::SubpassContents::eInline);
@@ -313,12 +315,13 @@ void render_work_thread(
         auto resultSubmit = renderQueue.queue.submit2(submitInfo2, commandPoolResetFence.get());
         utils::vk_ensure(resultSubmit);
         // Notify the main thread that submission process is complete
-        mainRendererComms[inflightIndex].imageViewHandleConsumed.release();
+        mainRendererComms[inflightIndex].imageViewRendered.release();
         // After submit
     }
     // Workaround for the lack of VK_EXT_swapchain_maintenance1 support,
-    //   use semaphore to avoid validation layer emitting `337425955: UNASSIGNED-Threading-MultipleThreads`
-    wait_vulkan_device_idle(renderDev);
+    //   use semaphore to avoid validation layer emitting `337425955: UNASSIGNED-Threading-MultipleThreads`,
+    //   or just mind our own business instead
+    utils::vk_ensure(renderQueue.queue.waitIdle());
 }
 
 #endif //VKLEARN_RENDER_THREAD_HPP
