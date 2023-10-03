@@ -47,6 +47,7 @@ The rest are trivial stuffs.
     auto renderQueue = utils::QueueStruct{.queue = vk::Queue{}, .queueFamilyIdx = 0};
     vk::Format renderSwapchainFmt; vk::Format renderDepthFmt;
     vk::Extent2D renderExtent;
+    vk::ImageUsageFlags renderSwapchainUsg;
     /*Our thin-layered manager objects*/
     auto resMgr = VulkanResourceManager{inst, physDev, renderDev, renderQueue};
     auto descMgr = DescriptorManager{renderDev};
@@ -161,7 +162,7 @@ The rest are trivial stuffs.
         swapchainImgInfo.arrayLayers = 1;
         swapchainImgInfo.samples = vk::SampleCountFlagBits::e1;
         swapchainImgInfo.tiling = vk::ImageTiling::eOptimal;
-        swapchainImgInfo.usage = vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eColorAttachment;
+        swapchainImgInfo.usage = renderSwapchainUsg;
         swapchainImgInfo.sharingMode = vk::SharingMode::eExclusive;
         auto swapchainViewInfo = factory::image_view_info_builder(
                 nullptr,

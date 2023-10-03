@@ -15,7 +15,7 @@ void render_work_thread(
         vk::Instance inst, vk::PhysicalDevice physDev, PhysicalDeviceInfo devProps, vk::Device renderDev,
         uint32_t queueFamilyIndex,
         VulkanResourceManager &&resMgrHdl,
-        vk::Extent2D renderExtent, vk::Format renderSwapchainFmt, vk::Format renderDepthFmt,
+        vk::Extent2D renderExtent, vk::Format renderSwapchainFmt, vk::ImageUsageFlags renderSwapchainUsg, vk::Format renderDepthFmt,
         vk::Semaphore imageAvailableSemaphore, vk::Semaphore renderCompleteSemaphore) {
     // Queue 0 is used by the main thread.
     auto queueIndex = inflightIndex+1;
@@ -75,6 +75,7 @@ void render_work_thread(
         if (attach.second.resId == "swapchainIMG") {
             attach.second.format = renderSwapchainFmt;
             attach.second.description.format = renderSwapchainFmt;
+            attach.second.usage = renderSwapchainUsg;
         }
         if (attach.second.resId == "depthIMG") {
             attach.second.format = renderDepthFmt;

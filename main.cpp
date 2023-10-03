@@ -491,6 +491,7 @@ vk::PresentModeKHR find_qualified_present_mode(const std::span<const vk::Present
 // oldSwapchain will be retired but not destroyed
 vk::UniqueSwapchainKHR create_swapchain(vk::Device device, vk::PhysicalDevice physicalDevice,
                                         const vk::Extent2D &surfaceExtent, const vk::SurfaceFormat2KHR &surfaceFormat2,
+                                        vk::ImageUsageFlags &imageUsage,
                                         vk::PresentModeKHR presentMode, uint32_t imageCount,
                                         vk::SurfaceKHR surface, vk::SwapchainKHR oldSwapchain = {}) {
 
@@ -516,7 +517,7 @@ vk::UniqueSwapchainKHR create_swapchain(vk::Device device, vk::PhysicalDevice ph
     createInfo.imageColorSpace = surfaceFormat2.surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+    createInfo.imageUsage = imageUsage;
     createInfo.imageSharingMode = vk::SharingMode::eExclusive;
     createInfo.queueFamilyIndexCount = 0;
     createInfo.pQueueFamilyIndices = nullptr;
@@ -529,6 +530,7 @@ vk::UniqueSwapchainKHR create_swapchain(vk::Device device, vk::PhysicalDevice ph
     auto [result, swapchain] = device.createSwapchainKHRUnique(createInfo);
     if (copyOfCreateInfo != createInfo) {
         utils::log_and_pause("WARN: VkSwapchainCreateInfoKHR{} was changed upon submission.", 0);
+        imageUsage = createInfo.imageUsage;
     }
     utils::vk_ensure(result, "swapchain creation failed");
     return std::move(swapchain);
@@ -593,6 +595,7 @@ int main(int argc, char *argv[]) {
     // Setup DynamicLoader (device-wide)
     VULKAN_HPP_DEFAULT_DISPATCHER.init(device.get());
     auto swapchainFormat = find_qualified_surface_format_2(physicalDeviceProps.surfaceFmts);
+    auto swapchainImgUsg = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eColorAttachment;
     auto swapchainPresentMode = find_qualified_present_mode(physicalDeviceProps.surfacePres);
     auto depthFormat = find_qualified_depth_format(physicalDeviceProps);
 
@@ -613,7 +616,8 @@ int main(int argc, char *argv[]) {
         utils::log_and_pause(std::format("Trying to acquire {} images from swapchain...", swapchainImageCount), 0);
         auto surfaceExtent = get_surface_size(p_SDLWindow, chosenPhysicalDevice, surfaceSDL.get());
         swapchain = create_swapchain(device.get(), chosenPhysicalDevice,
-                                     surfaceExtent, swapchainFormat, swapchainPresentMode, swapchainImageCount,
+                                     surfaceExtent, swapchainFormat, swapchainImgUsg,
+                                     swapchainPresentMode, swapchainImageCount,
                                      surfaceSDL.get(), swapchain.get());
         // Debuggers like Nsight Graphics will access the first queue at the main thread.
         size_t globalQueueIndex = 0;
@@ -632,8 +636,7 @@ int main(int argc, char *argv[]) {
                 imgHandle.resInfo.imageType = vk::ImageType::e2D;
                 //imgHandle.resInfo.flags = {};
                 imgHandle.resInfo.format = swapchainFormat.surfaceFormat.format;
-                imgHandle.resInfo.usage =
-                        vk::ImageUsageFlagBits::eColorAttachment;
+                imgHandle.resInfo.usage = swapchainImgUsg;
                 imgHandle.resInfo.extent = {{.width = surfaceExtent.width, .height = surfaceExtent.height, .depth = 1}};
                 imgHandle.resInfo.tiling = vk::ImageTiling::eOptimal;
                 imgHandle.resInfo.samples = vk::SampleCountFlagBits::e1;
@@ -679,7 +682,7 @@ int main(int argc, char *argv[]) {
                     instance.get(), chosenPhysicalDevice, physicalDeviceProps, device.get(),
                     queueFamilyIndex,
                     globalResMgr.getManagerHandle(),
-                    surfaceExtent, swapchainFormat.surfaceFormat.format, depthFormat,
+                    surfaceExtent, swapchainFormat.surfaceFormat.format, swapchainImgUsg, depthFormat,
                     imageAvailableSemaphores[threadIdx].get(), renderCompleteSemaphores[threadIdx].get()};
         }
         bool resetSwapchain = false;

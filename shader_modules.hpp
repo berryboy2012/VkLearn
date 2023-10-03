@@ -886,8 +886,8 @@ public:
             // For swapchain images, we need some image info for framebuffer creation
             swapchainImageAttachmentInfo.flags = {};
             // Required by VK_KHR_imageless_framebuffer if this is the swapchain Image
-            swapchainImageAttachmentInfo.usage =
-                    vk::ImageUsageFlagBits::eColorAttachment;
+            // Needs to be exact same as those during swapchain creation
+            swapchainImageAttachmentInfo.usage = {};
             swapchainImageAttachmentInfo.format = {};
             swapchainImageAttachmentInfo.tiling = vk::ImageTiling::eOptimal;
             swapchainImageAttachmentInfo.layout = vk::ImageLayout::ePresentSrcKHR;
