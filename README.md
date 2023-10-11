@@ -210,6 +210,7 @@ The rest are trivial stuffs.
 - ~~Refactoring the code (with the help of VMA), so we don't lose our sanity when using Vulkan. 
  We cannot do this earlier because we haven't implemented a 'working' renderer yet.~~ Almost done.
 - ~~Build a thin abstract layer to simplify some resource management tasks. (Mostly things with a pool in their names)~~
+- State machine handling interactions and events.
 - OpenVR/OpenXR integration.
 - FSR/DLSS integration.
 - Be able to view arbitrary 3D models.
