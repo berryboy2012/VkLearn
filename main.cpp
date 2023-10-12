@@ -73,14 +73,17 @@ void query_ovr() {
 }
 
 SDL_Window *init_sdl() {
+    SDL_SetHint(SDL_HINT_VIDEO_HIGHDPI_DISABLED, "0");
     SDL_Init(SDL_INIT_VIDEO);
+    //
     SDL_Vulkan_LoadLibrary(nullptr);
     auto window = SDL_CreateWindow(
             "VkLearn",
             SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-            640, 360,
-            SDL_WINDOW_SHOWN | SDL_WINDOW_VULKAN);
+            800, 500,
+            SDL_WINDOW_SHOWN | SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI);// | SDL_WINDOW_FULLSCREEN);
     SDL_SetWindowResizable(window, SDL_TRUE);
+
     return window;
 }
 
@@ -379,6 +382,12 @@ bool want_exit_sdl() {
                 || sdlEvent.key.keysym.sym == SDLK_q) {
                 bRet = true;
             }
+            if (sdlEvent.key.keysym.sym == SDLK_RETURN) {
+                if (sdlEvent.key.keysym.mod & KMOD_ALT) {
+                    // TODO: get full-screen mode working.
+                    utils::log_and_pause("Full-screen mode alteration requested.", 0);
+                }
+            }
         }
     }
     return bRet;
@@ -441,9 +450,23 @@ create_vulkan_device(const vk::PhysicalDevice &chosenPhysicalDevice, const Physi
 vk::Extent2D get_surface_size(SDL_Window *p_SDLWindow, vk::PhysicalDevice physicalDevice, vk::SurfaceKHR surface) {
     auto surfaceExtent = vk::Extent2D{};
     int width, height;
+    SDL_GetWindowSize(p_SDLWindow, &width, &height);
+    utils::log_and_pause(
+            std::format(
+                    "SDL_GetWindowSize: {}x{}",
+                    width, height), 0);
+    SDL_GetWindowSizeInPixels(p_SDLWindow, &width, &height);
+    utils::log_and_pause(
+            std::format(
+                    "SDL_GetWindowSizeInPixels: {}x{}",
+                    width, height), 0);
     SDL_Vulkan_GetDrawableSize(p_SDLWindow, &width, &height);
     surfaceExtent.width = width;
     surfaceExtent.height = height;
+    utils::log_and_pause(
+            std::format(
+                    "SDL_Vulkan_GetDrawableSize: {}x{}",
+                    surfaceExtent.width, surfaceExtent.height), 0);
     // Sometimes SDL's surface size report is unreliable.
     auto surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface).value;
     if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
@@ -496,6 +519,10 @@ vk::UniqueSwapchainKHR create_swapchain(vk::Device device, vk::PhysicalDevice ph
                                         vk::SurfaceKHR surface, vk::SwapchainKHR oldSwapchain = {}) {
 
     auto surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface).value;
+    utils::log_and_pause(
+            std::format(
+                    "\n\tPhysicalDeviceSurfaceCapabilitiesKHR.currentExtent: {}x{}",
+                    surfaceCapabilities.currentExtent.width, surfaceCapabilities.currentExtent.height),0);
     vk::Extent2D extent{};
     {
         if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
@@ -533,6 +560,7 @@ vk::UniqueSwapchainKHR create_swapchain(vk::Device device, vk::PhysicalDevice ph
         imageUsage = createInfo.imageUsage;
     }
     utils::vk_ensure(result, "swapchain creation failed");
+    utils::log_and_pause(std::format("Swapchain created: {}x{} Px.", createInfo.imageExtent.width, createInfo.imageExtent.height),0);
     return std::move(swapchain);
 }
 
@@ -555,7 +583,7 @@ int main(int argc, char *argv[]) {
      *
      * End of global objects initialization
      * */
-    bool bDebug = true;
+    bool bDebug = false;
     // Setup DynamicLoader (process-wide)
     vk::DynamicLoader dl;
     auto vkGetInstanceProcAddr = dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
@@ -744,6 +772,7 @@ int main(int argc, char *argv[]) {
                 auto resultPresent = globalQueue.queue.presentKHR(presentInfoCombined.get<vk::PresentInfoKHR>());
                 if (resultPresent == vk::Result::eErrorOutOfDateKHR || resultPresent == vk::Result::eSuboptimalKHR) {
                     resetSwapchain = true;
+                    utils::log_and_pause("vk::Result::eErrorOutOfDateKHR", 0);
                 } else {
                     utils::vk_ensure(resultPresent);
                 }
@@ -759,6 +788,7 @@ int main(int argc, char *argv[]) {
                     imageAvailableSemaphores[currentRenderer].get(), nullptr);
             if (result == vk::Result::eErrorOutOfDateKHR) {
                 resetSwapchain = true;
+                utils::log_and_pause("vk::Result::eErrorOutOfDateKHR", 0);
                 continue;
             } else if (result != vk::Result::eSuboptimalKHR) {
                 utils::vk_ensure(result);
